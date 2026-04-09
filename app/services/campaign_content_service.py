@@ -10,7 +10,12 @@ from urllib.parse import urlparse
 import discord
 
 from app.services.ai import AiService
-from app.services.campaign_content_fetchers import fetch_horoscope_content, fetch_news_content, fetch_weather_content
+from app.services.campaign_content_fetchers import (
+    fetch_daily_news_extras,
+    fetch_horoscope_content,
+    fetch_news_content,
+    fetch_weather_content,
+)
 from app.services.campaign_content_formatter import (
     HOROSCOPE_SECTIONS,
     SIGN_ORDER,
@@ -62,11 +67,16 @@ class CampaignContentService:
                 await self.execute_horoscope_service(config)
 
     async def execute_news_service(self, config: dict[str, Any]) -> None:
+        config = dict(config)
         categories = self._csv_to_list(config.get("categories_json"))
         if not categories:
             categories = self._csv_to_list(config.get("categories"))
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
         payload = fetch_news_content(configured_sources, categories)
+        config["extras_payload"] = fetch_daily_news_extras(datetime.now(timezone.utc))
+        next_run = await self._resolve_next_news_scheduled_run(config)
+        if next_run is not None:
+            config["next_scheduled_run_at"] = next_run.isoformat()
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         used_model: str | None = None
         fallback_used = False
@@ -223,16 +233,88 @@ class CampaignContentService:
 
     async def _rewrite_news_payload(self, payload: dict[str, Any]) -> str | None:
         used_ai = False
+        cache: dict[str, str] = {}
         for items in payload.get("categories", {}).values():
             for item in items[:5]:
-                rewritten, ai_used = await self._rewrite_text(
-                    item.get("summary", ""),
-                    context="notizie",
-                    extra=[item.get("title", ""), item.get("category", "")],
-                )
-                item["summary"] = rewritten
+                ai_summary, ai_used = await self._summarize_news_item_for_embed(item, cache=cache)
+                if ai_summary:
+                    item["ai_summary"] = ai_summary
+                item["summary_fallback_used"] = not ai_used
                 used_ai = used_ai or ai_used
         return self._resolve_ai_model_name("campaign_editorial") if used_ai else None
+
+    async def _resolve_next_news_scheduled_run(self, config: dict[str, Any]) -> datetime | None:
+        guild_id = str(config.get("guild_id") or "").strip()
+        channel_id = str(config.get("channel_id") or "").strip()
+        service_type = str(config.get("service_type") or "NEWS").upper()
+        if not guild_id or not channel_id or service_type != "NEWS":
+            return None
+        if not hasattr(self._database, "list_campaign_content_recurring_schedule_runs"):
+            return None
+        rows = await self._database.list_campaign_content_recurring_schedule_runs(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            service_type=service_type,
+            after_iso=datetime.now(timezone.utc).isoformat(),
+        )
+        if not rows:
+            return None
+        parsed: list[datetime] = []
+        for row in rows:
+            run_at_raw = str(row.get("next_effective_run_at") or row.get("next_run_at") or "").strip()
+            if not run_at_raw:
+                continue
+            try:
+                run_at = datetime.fromisoformat(run_at_raw.replace("Z", "+00:00"))
+                parsed.append(run_at if run_at.tzinfo else run_at.replace(tzinfo=timezone.utc))
+            except ValueError:
+                continue
+        if not parsed:
+            return None
+        return min(parsed)
+
+    async def _summarize_news_item_for_embed(self, item: dict[str, Any], *, cache: dict[str, str]) -> tuple[str, bool]:
+        title = str(item.get("title") or "").strip()
+        source = str(item.get("source") or "").strip()
+        category = str(item.get("category") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        description = str(item.get("description") or "").strip()
+        published_at = str(item.get("published_at") or "").strip()
+        seed = f"{category}|{title}|{source}|{summary}|{description}|{published_at}".strip()
+        if seed in cache:
+            return cache[seed], True
+        fallback = self._sanitize_news_summary_fallback(summary or description)
+        if self._ai is None or not self._ai.is_enabled():
+            return fallback, False
+        prompt = (
+            "Riscrivi questa notizia in italiano in massimo 2 frasi brevi. "
+            "Tono vivace, leggero e cricetoso, ma rispettoso per temi delicati. "
+            "Non copiare il testo sorgente, non inventare dettagli, usa solo i dati forniti.\n"
+            f"Categoria: {category}\nTitolo: {title}\nFonte: {source}\nPubblicata: {published_at}\n"
+            f"Summary: {summary}\nSnippet: {description}"
+        )
+        try:
+            output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
+        except Exception as exc:
+            logger.warning("campaign content: news summary ask failed (%s), using fallback summary", exc.__class__.__name__)
+            return fallback, False
+        cleaned = self._sanitize_news_summary_fallback(self._sanitize_editorial_text(output or ""))
+        if not cleaned:
+            return fallback, False
+        cache[seed] = cleaned
+        return cleaned, True
+
+    @staticmethod
+    def _sanitize_news_summary_fallback(text: str) -> str:
+        cleaned = CampaignContentService._sanitize_editorial_text(text)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned:
+            return "Dettagli in aggiornamento."
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+        if not sentences:
+            return cleaned[:220]
+        return " ".join(sentences[:2])[:280]
 
     async def _rewrite_weather_payload(self, payload: dict[str, Any]) -> str | None:
         used_ai = False

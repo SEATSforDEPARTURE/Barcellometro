@@ -329,6 +329,12 @@ def test_news_schedule_add_accepts_display_labels_and_persists_canonical_values(
     asyncio.run(_run())
 
 
+def test_news_run_uses_scheduler_backed_next_run_resolver() -> None:
+    source = Path(__file__).resolve().parents[1].joinpath("app/services/campaign_content_service.py").read_text()
+    assert "_resolve_next_news_scheduled_run" in source
+    assert "next_scheduled_run_at" in source
+
+
 def test_news_schedule_add_persists_extras_json(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()

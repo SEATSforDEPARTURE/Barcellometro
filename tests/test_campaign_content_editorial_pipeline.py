@@ -64,8 +64,8 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     field_names = [field.name for field in embeds[0].fields]
     assert field_names[0] == "⚡ __**ULTIM'ORA**__"
     assert field_names[1] == "🌟 __**IN EVIDENZA**__"
-    assert "__**CRONACA IN PRIMO PIANO**__" in field_names
-    assert "__**TECNOLOGIA IN PRIMO PIANO**__" in field_names
+    assert "🕵️ __**CRONACA IN PRIMO PIANO**__" in field_names
+    assert "💻 __**TECNOLOGIA IN PRIMO PIANO**__" in field_names
     assert "__**SPORT IN PRIMO PIANO**__" not in field_names
 
 
@@ -115,10 +115,80 @@ def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
     fields = [field.name for field in build_news_embeds({}, payload)[0].fields]
     editorial = [name for name in fields if "IN PRIMO PIANO" in name]
     assert editorial == [
-        "__**ECONOMIA IN PRIMO PIANO**__",
-        "__**SPORT IN PRIMO PIANO**__",
-        "__**CRONACA IN PRIMO PIANO**__",
+        "💼 __**ECONOMIA IN PRIMO PIANO**__",
+        "⚽ __**SPORT IN PRIMO PIANO**__",
+        "🕵️ __**CRONACA IN PRIMO PIANO**__",
     ]
+
+
+def test_news_title_has_emoji_outside_markdown() -> None:
+    news = build_news_embeds(
+        {},
+        {"generated_at": "2026-04-09T13:00:00+02:00", "categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://x"}]}},
+    )
+    assert news[0].title == "📰 __**HAMSTER NEWS • EDIZIONE POMERIDIANA**__"
+
+
+def test_news_description_uses_natural_greetings_by_daypart() -> None:
+    cases = [
+        ("2026-04-09T06:30:00+02:00", "Buon mattino"),
+        ("2026-04-09T14:30:00+02:00", "Buon pomeriggio"),
+        ("2026-04-09T20:30:00+02:00", "Buonasera"),
+        ("2026-04-09T01:30:00+02:00", "Buona notte"),
+    ]
+    for generated_at, expected in cases:
+        news = build_news_embeds(
+            {},
+            {"generated_at": generated_at, "categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://x"}]}},
+        )
+        description = news[0].description or ""
+        assert expected in description
+        assert "Buona pomeriggio" not in description
+
+
+def test_news_rewrite_prefers_ai_summary_over_raw_summary() -> None:
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *_args, **_kwargs):
+            return "Mini sintesi cricetosa. Seconda frase."
+
+        def get_model_config(self, _task):
+            return "gpt-4.1-mini"
+
+        def get_model_display_name(self, _task):
+            return "gpt-4.1-mini"
+
+    async def _run() -> None:
+        service = CampaignContentService(database=object(), bot=object(), ai_service=_Ai())  # type: ignore[arg-type]
+        payload = {"categories": {"cronaca": [{"title": "T", "summary": "Raw summary", "source": "ansa", "category": "cronaca"}]}}
+        await service._rewrite_news_payload(payload)  # type: ignore[attr-defined]
+        item = payload["categories"]["cronaca"][0]
+        assert item["ai_summary"] == "Mini sintesi cricetosa. Seconda frase."
+        assert item["summary"] == "Raw summary"
+
+    asyncio.run(_run())
+
+
+def test_news_rewrite_falls_back_when_ai_fails() -> None:
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *_args, **_kwargs):
+            raise RuntimeError("boom")
+
+    async def _run() -> None:
+        service = CampaignContentService(database=object(), bot=object(), ai_service=_Ai())  # type: ignore[arg-type]
+        payload = {"categories": {"cronaca": [{"title": "T", "summary": "Prima. Seconda. Terza.", "source": "ansa", "category": "cronaca"}]}}
+        await service._rewrite_news_payload(payload)  # type: ignore[attr-defined]
+        item = payload["categories"]["cronaca"][0]
+        assert item["summary_fallback_used"] is True
+        assert "ai_summary" in item
+        assert item["ai_summary"].startswith("Prima. Seconda.")
+
+    asyncio.run(_run())
 
 
 def test_build_horoscope_embeds_strip_inner_headings() -> None:

@@ -5329,6 +5329,62 @@ class DatabaseService:
             (next_run_at, last_sent_at, now, guild_id, config_id),
         )
 
+    async def list_campaign_content_recurring_schedule_runs(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str,
+        service_type: str,
+        after_iso: str,
+    ) -> list[dict[str, Any]]:
+        rows = await self.fetchall(
+            """
+            SELECT id, next_run_at, interval_minutes
+            FROM campaign_content_configs
+            WHERE guild_id = ?
+              AND channel_id = ?
+              AND service_type = ?
+              AND enabled = 1
+              AND deleted_at IS NULL
+              AND interval_minutes > 0
+            ORDER BY id ASC
+            """,
+            (guild_id, channel_id, service_type),
+        )
+        try:
+            after_dt_raw = datetime.fromisoformat(str(after_iso).replace("Z", "+00:00"))
+            after_dt = after_dt_raw if after_dt_raw.tzinfo else after_dt_raw.replace(tzinfo=timezone.utc)
+        except ValueError:
+            after_dt = datetime.now(timezone.utc)
+        scheduled: list[dict[str, Any]] = []
+        for row in rows:
+            next_run_at = str(row["next_run_at"] or "").strip()
+            if not next_run_at:
+                continue
+            interval_minutes = int(row["interval_minutes"] or 0)
+            if interval_minutes <= 0:
+                continue
+            try:
+                next_run_raw = datetime.fromisoformat(next_run_at.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            next_run = next_run_raw if next_run_raw.tzinfo else next_run_raw.replace(tzinfo=timezone.utc)
+            effective = next_run
+            while effective <= after_dt:
+                effective = effective + timedelta(minutes=interval_minutes)
+            if effective <= after_dt:
+                continue
+            scheduled.append(
+                {
+                    "id": int(row["id"]),
+                    "next_run_at": next_run.isoformat(),
+                    "next_effective_run_at": effective.isoformat(),
+                    "interval_minutes": interval_minutes,
+                }
+            )
+        scheduled.sort(key=lambda item: str(item["next_effective_run_at"]))
+        return scheduled
+
     async def upsert_campaign_content_message(
         self,
         *,

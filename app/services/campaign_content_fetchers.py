@@ -334,6 +334,12 @@ HOROSCOPE_SOURCE_MAP = {
 DEFAULT_NEWS_SOURCES = ["ansa", "repubblica"]
 DEFAULT_WEATHER_SOURCES = ["open-meteo", "meteoam", "3bmeteo"]
 DEFAULT_HOROSCOPE_SOURCES = ["ohmanda"]
+DEFAULT_DAILY_EXTRAS = {
+    "barzelletta": "Il criceto in redazione: «Giuro, oggi solo un titolo». Due ore dopo: edizione straordinaria.",
+    "aforisma": "La notizia corre, il criterio decide la direzione. — Barcellometro",
+    "canzone": "Heroes — David Bowie\nUna spinta buona per tenere il ritmo della redazione.",
+    "meme": "Quando dici «chiudo le tab» e ne apri altre cinque per verificare la fonte.",
+}
 
 SIGNS = [
     "Ariete",
@@ -725,6 +731,131 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
         "configured_categories": normalized_categories,
         "all_items": dedupe_news_items(items),
     }
+
+
+def _http_get_json(url: str) -> Any:
+    return json.loads(_http_get(url))
+
+
+def fetch_daily_joke() -> str:
+    try:
+        data = _http_get_json("https://v2.jokeapi.dev/joke/Any?lang=en&type=single,twopart&safe-mode")
+        if isinstance(data, dict):
+            if data.get("type") == "single":
+                joke = str(data.get("joke") or "").strip()
+                if joke:
+                    return joke
+            setup = str(data.get("setup") or "").strip()
+            delivery = str(data.get("delivery") or "").strip()
+            combined = f"{setup} {delivery}".strip()
+            if combined:
+                return combined
+    except Exception:
+        pass
+    try:
+        data = _http_get_json("https://official-joke-api.appspot.com/random_joke")
+        setup = str(data.get("setup") or "").strip() if isinstance(data, dict) else ""
+        punchline = str(data.get("punchline") or "").strip() if isinstance(data, dict) else ""
+        combined = f"{setup} {punchline}".strip()
+        if combined:
+            return combined
+    except Exception:
+        pass
+    return DEFAULT_DAILY_EXTRAS["barzelletta"]
+
+
+def fetch_daily_quote() -> str:
+    try:
+        data = _http_get_json("https://zenquotes.io/api/today")
+        if isinstance(data, list) and data:
+            first = data[0] if isinstance(data[0], dict) else {}
+            quote = str(first.get("q") or "").strip()
+            author = str(first.get("a") or "").strip()
+            if quote:
+                return f"{quote} — {author}" if author else quote
+    except Exception:
+        pass
+    try:
+        data = _http_get_json("https://api.quotable.io/random")
+        if isinstance(data, dict):
+            quote = str(data.get("content") or "").strip()
+            author = str(data.get("author") or "").strip()
+            if quote:
+                return f"{quote} — {author}" if author else quote
+    except Exception:
+        pass
+    return DEFAULT_DAILY_EXTRAS["aforisma"]
+
+
+def fetch_daily_song() -> str:
+    try:
+        data = _http_get_json("https://itunes.apple.com/us/rss/topsongs/limit=20/json")
+        entry = (
+            data.get("feed", {}).get("entry", [])[0]
+            if isinstance(data, dict)
+            else {}
+        )
+        title = str(entry.get("im:name", {}).get("label") or "").strip() if isinstance(entry, dict) else ""
+        artist = str(entry.get("im:artist", {}).get("label") or "").strip() if isinstance(entry, dict) else ""
+        if title and artist:
+            return f"{title} — {artist}\nScelta live dalla classifica del giorno."
+    except Exception:
+        pass
+    try:
+        data = _http_get_json("https://api.deezer.com/chart/0/tracks?limit=1")
+        rows = data.get("data", []) if isinstance(data, dict) else []
+        row = rows[0] if rows and isinstance(rows[0], dict) else {}
+        title = str(row.get("title") or "").strip()
+        artist = str((row.get("artist") or {}).get("name") or "").strip() if isinstance(row.get("artist"), dict) else ""
+        if title and artist:
+            return f"{title} — {artist}\nBrano in trend pescato dalle chart globali."
+    except Exception:
+        pass
+    return DEFAULT_DAILY_EXTRAS["canzone"]
+
+
+def fetch_daily_meme() -> str:
+    try:
+        payload = _http_get_json("https://www.reddit.com/r/memes/top.json?t=day&limit=10")
+        children = payload.get("data", {}).get("children", []) if isinstance(payload, dict) else []
+        for child in children:
+            data = child.get("data", {}) if isinstance(child, dict) else {}
+            title = str(data.get("title") or "").strip()
+            if title:
+                return title
+    except Exception:
+        pass
+    try:
+        payload = _http_get_json("https://api.imgflip.com/get_memes")
+        memes = payload.get("data", {}).get("memes", []) if isinstance(payload, dict) else []
+        first = memes[0] if memes and isinstance(memes[0], dict) else {}
+        name = str(first.get("name") or "").strip()
+        if name:
+            return f"Oggi gira forte il template: {name}."
+    except Exception:
+        pass
+    return DEFAULT_DAILY_EXTRAS["meme"]
+
+
+def fetch_daily_news_extras(base_dt: datetime | None = None) -> dict[str, str]:
+    _ = base_dt
+    extras = {
+        "barzelletta": fetch_daily_joke(),
+        "aforisma": fetch_daily_quote(),
+        "canzone": fetch_daily_song(),
+        "meme": fetch_daily_meme(),
+    }
+    deduped: dict[str, str] = {}
+    seen: set[str] = set()
+    for key, value in extras.items():
+        clean = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not clean:
+            clean = DEFAULT_DAILY_EXTRAS[key]
+        if clean.lower() in seen:
+            clean = DEFAULT_DAILY_EXTRAS[key]
+        seen.add(clean.lower())
+        deduped[key] = clean[:320]
+    return deduped
 
 
 def fetch_weather_content(sources: list[str]) -> dict[str, Any]:
