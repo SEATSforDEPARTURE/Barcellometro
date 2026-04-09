@@ -208,19 +208,19 @@ NEWS_EXTRA_CATALOG = {
 NEWS_DAYPART_COPY = {
     "mattina": (
         "🐹 Buon mattino: qui Barcellometro in regia, con la redazione già in corsa sulla ruota delle news. "
-        "Titoli freschi, zampette veloci e subito al punto."
+        "Titoli freschi, zampette veloci e subito al punto. 📰"
     ),
     "pomeriggio": (
         "🐹 Buon pomeriggio: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
-        "Titoli caldi, pochi giri di parole e dritti al punto."
+        "Titoli caldi, pochi giri di parole e dritti al punto. 📰"
     ),
     "sera": (
         "🐹 Buonasera: qui Barcellometro in regia, con la redazione e le notizie che si siedono sotto i riflettori. "
-        "Facciamo ordine nel caos e vediamo cosa merita davvero attenzione."
+        "Facciamo ordine nel caos e vediamo cosa merita davvero attenzione. 📰"
     ),
     "notte": (
         "🐹 Buona notte: qui Barcellometro ancora sveglio in redazione, con gli ultimi fruscii dal mondo prima di spegnere le luci. "
-        "Due zampate rapide e il quadro è completo."
+        "Due zampate rapide e il quadro è completo. 📰"
     ),
 }
 

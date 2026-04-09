@@ -107,6 +107,8 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
     assert "**Che ci racconta il mondo oggi?**" in description
+    assert "🐹" in description
+    assert "📰" in description
     assert any(greeting in description for greeting in ["Buon mattino", "Buon pomeriggio", "Buonasera", "Buona notte"])
     assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
 

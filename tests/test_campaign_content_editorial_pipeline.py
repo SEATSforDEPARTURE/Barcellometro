@@ -272,6 +272,24 @@ def test_news_rewrite_sanitizes_prompt_leakage_prefixes() -> None:
     assert cleaned == "Nuova versione pulita."
 
 
+def test_news_summary_input_sanitization_removes_boilerplate_and_duplicates() -> None:
+    service = CampaignContentService(database=object(), bot=object(), ai_service=None)  # type: ignore[arg-type]
+    cleaned = service._build_news_summary_input(  # type: ignore[attr-defined]
+        {
+            "title": "- Ecco una possibile versione in italiano: Titolo pulito",
+            "summary": "Titolo pulito. fonte: ansa.it continua a leggere",
+            "description": "Ecco una possibile versione in italiano: dettaglio reale.",
+            "category": "cronaca",
+            "source": "ansa.it",
+        }
+    )
+    assert cleaned["title"] == "Titolo pulito"
+    assert "fonte:" not in cleaned["content"].lower()
+    assert "continua a leggere" not in cleaned["content"].lower()
+    assert "versione in italiano" not in cleaned["content"].lower()
+    assert cleaned["content"] == "dettaglio reale."
+
+
 def test_execute_news_service_reads_csv_categories_fallback_column() -> None:
     class _Db:
         async def upsert_campaign_content_message(self, **_kwargs):
