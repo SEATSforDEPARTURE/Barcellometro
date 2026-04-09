@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from difflib import SequenceMatcher
+from html import unescape
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -40,6 +42,22 @@ from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
 logger = logging.getLogger(__name__)
 
+_NEWS_INPUT_META_RE = re.compile(
+    r"(?im)\b(?:ecco una possibile versione in italiano|versione in italiano|in breve|riassunto|sintesi)\b[:\-\s]*"
+)
+_NEWS_INPUT_FEED_JUNK_RE = re.compile(r"(?i)\b(?:continua a leggere|leggi anche|clicca qui|read more)\b[^\n.?!]*")
+_NEWS_INPUT_SOURCE_TRAIL_RE = re.compile(r"(?i)\bfonte\s*:[^\n]*")
+_NEWS_AI_META_RE = re.compile(
+    r"(?i)\b(?:ecco|versione in italiano|riassunto|questa notizia|in questa notizia|contenuto fornito)\b"
+)
+_COMMON_ENGLISH_NEWS_WORDS = {"the", "and", "with", "breaking", "update", "today", "after", "from", "that", "this"}
+_NEWS_EXTRA_ITALIAN_FALLBACKS = {
+    "barzelletta": "Il criceto in redazione: «Promesso, oggi apro solo tre tab». Erano trenta.",
+    "aforisma": "La notizia corre, il criterio decide la direzione. — Barcellometro",
+    "canzone": "Heroes — David Bowie\nEnergia da prima pagina per la ruota della redazione.",
+    "meme": "Quando dici «chiudo in 5 minuti» e la breaking spunta al minuto 6.",
+}
+
 
 class CampaignContentService:
     def __init__(self, database: DatabaseService, bot: discord.Client, ai_service: Optional[AiService] = None) -> None:
@@ -73,7 +91,8 @@ class CampaignContentService:
             categories = self._csv_to_list(config.get("categories"))
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
         payload = fetch_news_content(configured_sources, categories)
-        config["extras_payload"] = fetch_daily_news_extras(datetime.now(timezone.utc))
+        raw_extras = fetch_daily_news_extras(datetime.now(timezone.utc))
+        config["extras_payload"] = await self._normalize_news_extras_payload(raw_extras)
         next_run = await self._resolve_next_news_scheduled_run(config)
         if next_run is not None:
             config["next_scheduled_run_at"] = next_run.isoformat()
@@ -274,33 +293,42 @@ class CampaignContentService:
         return min(parsed)
 
     async def _summarize_news_item_for_embed(self, item: dict[str, Any], *, cache: dict[str, str]) -> tuple[str, bool]:
-        title = str(item.get("title") or "").strip()
-        source = str(item.get("source") or "").strip()
-        category = str(item.get("category") or "").strip()
-        summary = str(item.get("summary") or "").strip()
-        description = str(item.get("description") or "").strip()
-        published_at = str(item.get("published_at") or "").strip()
-        seed = f"{category}|{title}|{source}|{summary}|{description}|{published_at}".strip()
+        prepared = self._build_news_summary_input(item)
+        seed = "|".join(str(prepared.get(k) or "") for k in ("category", "title", "source", "content", "published_at")).strip()
         if seed in cache:
             return cache[seed], True
-        fallback = self._sanitize_news_summary_fallback(summary or description)
+        title = str(prepared.get("title") or "").strip()
+        category = str(prepared.get("category") or "").strip()
+        content = str(prepared.get("content") or "").strip()
+        source = str(prepared.get("source") or "").strip()
+        published_at = str(prepared.get("published_at") or "").strip()
+        fallback = self._build_news_summary_fallback(title=title, cleaned_summary=content)
+        logger.debug("news_ai_summary_start title=%s category=%s source=%s", title[:80], category or "varie", source or "n/a")
         if self._ai is None or not self._ai.is_enabled():
             return fallback, False
-        prompt = (
-            "Riscrivi questa notizia in italiano in massimo 2 frasi brevi. "
-            "Tono vivace, leggero e cricetoso, ma rispettoso per temi delicati. "
-            "Non copiare il testo sorgente, non inventare dettagli, usa solo i dati forniti.\n"
-            f"Categoria: {category}\nTitolo: {title}\nFonte: {source}\nPubblicata: {published_at}\n"
-            f"Summary: {summary}\nSnippet: {description}"
+        prompt = self._build_news_summary_prompt(
+            title=title,
+            content=content,
+            category=category,
+            source=source,
+            published_at=published_at,
         )
         try:
             output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
         except Exception as exc:
             logger.warning("campaign content: news summary ask failed (%s), using fallback summary", exc.__class__.__name__)
+            logger.info("news_ai_summary_fallback_used title=%s reason=ai_request_failed", title[:80])
             return fallback, False
-        cleaned = self._sanitize_news_summary_fallback(self._sanitize_editorial_text(output or ""))
-        if not cleaned:
+        accepted, reason, cleaned = self._is_acceptable_news_ai_summary(
+            output or "",
+            source_title=title,
+            source_summary=content,
+        )
+        if not accepted:
+            logger.info("news_ai_summary_rejected reason=%s title=%s", reason, title[:80])
+            logger.info("news_ai_summary_fallback_used title=%s", title[:80])
             return fallback, False
+        logger.info("news_ai_summary_accepted title=%s chars=%s", title[:80], len(cleaned))
         cache[seed] = cleaned
         return cleaned, True
 
@@ -315,6 +343,142 @@ class CampaignContentService:
         if not sentences:
             return cleaned[:220]
         return " ".join(sentences[:2])[:280]
+
+    @staticmethod
+    def _sanitize_news_input_text(text: str) -> str:
+        cleaned = unescape(CampaignContentService._sanitize_editorial_text(text))
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"(?im)^\s*-\s*", "", cleaned)
+        cleaned = _NEWS_INPUT_META_RE.sub("", cleaned)
+        cleaned = _NEWS_INPUT_FEED_JUNK_RE.sub(" ", cleaned)
+        cleaned = _NEWS_INPUT_SOURCE_TRAIL_RE.sub(" ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n-•")
+        return cleaned
+
+    def _build_news_summary_input(self, item: dict[str, Any]) -> dict[str, str]:
+        title = self._sanitize_news_input_text(str(item.get("title") or ""))
+        category = self._sanitize_news_input_text(str(item.get("category") or ""))
+        source = self._sanitize_news_input_text(str(item.get("source") or ""))
+        published_at = self._sanitize_news_input_text(str(item.get("published_at") or ""))
+        summary = self._sanitize_news_input_text(str(item.get("summary") or ""))
+        description = self._sanitize_news_input_text(str(item.get("description") or ""))
+        summary_effective = summary
+        if title and summary and SequenceMatcher(None, title.lower(), summary.lower()).ratio() >= 0.9:
+            summary_effective = ""
+        content = summary_effective or description
+        if summary_effective and description and SequenceMatcher(None, summary_effective.lower(), description.lower()).ratio() < 0.8:
+            content = f"{summary_effective} {description}".strip()
+        if title and content and SequenceMatcher(None, title.lower(), content.lower()).ratio() >= 0.9:
+            content = ""
+        if not content:
+            content = title
+        return {
+            "title": title,
+            "category": category,
+            "source": source,
+            "published_at": published_at,
+            "content": content,
+        }
+
+    @staticmethod
+    def _build_news_summary_prompt(*, title: str, content: str, category: str, source: str, published_at: str) -> str:
+        fields = [f"Titolo: {title or 'n/d'}", f"Contenuto: {content or title or 'n/d'}"]
+        if category:
+            fields.append(f"Categoria: {category}")
+        if source:
+            fields.append(f"Fonte tecnica: {source}")
+        if published_at:
+            fields.append(f"Pubblicata: {published_at}")
+        return (
+            "Ricevi solo titolo e breve contenuto di una notizia. "
+            "Scrivi un mini-riassunto in italiano di massimo 2 frasi. "
+            "Usa solo le informazioni fornite. Non aggiungere contesto esterno, non inventare dettagli, "
+            "non fare introduzioni meta, non citare la fonte nel testo, non copiare quasi letteralmente il testo sorgente. "
+            "Tono leggero e leggibile, ma sobrio e rispettoso per notizie delicate.\n"
+            + "\n".join(fields)
+        )
+
+    def _is_acceptable_news_ai_summary(self, raw_output: str, *, source_title: str, source_summary: str) -> tuple[bool, str, str]:
+        cleaned = self._sanitize_news_summary_fallback(self._sanitize_editorial_text(raw_output))
+        if not cleaned or len(cleaned) < 24:
+            return False, "too_short_or_empty", ""
+        if len(cleaned) > 320:
+            return False, "too_long", cleaned[:320]
+        if _NEWS_AI_META_RE.search(cleaned):
+            return False, "meta_output", cleaned
+        if re.search(r"<[^>]+>|```", cleaned):
+            return False, "dirty_markup", cleaned
+        sentence_count = len([s for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()])
+        if sentence_count > 2:
+            return False, "too_many_sentences", cleaned
+        source_blob = " ".join(part for part in [source_title, source_summary] if part).strip().lower()
+        if source_blob:
+            if SequenceMatcher(None, cleaned.lower(), source_blob).ratio() >= 0.9:
+                return False, "too_similar_to_source", cleaned
+            overlap = SequenceMatcher(None, cleaned.lower(), str(source_summary or "").lower()).ratio()
+            if overlap >= 0.87:
+                return False, "feed_copy_overlap", cleaned
+        english_hits = sum(1 for token in re.findall(r"[a-zA-Z']+", cleaned.lower()) if token in _COMMON_ENGLISH_NEWS_WORDS)
+        if english_hits >= 4:
+            return False, "unexpected_english", cleaned
+        return True, "accepted", cleaned
+
+    def _build_news_summary_fallback(self, *, title: str, cleaned_summary: str) -> str:
+        base = self._sanitize_news_summary_fallback(cleaned_summary)
+        if base and title and SequenceMatcher(None, base.lower(), title.lower()).ratio() > 0.9:
+            base = ""
+        if base:
+            return base
+        title_clean = self._sanitize_news_input_text(title)
+        if not title_clean:
+            return "Dettagli in aggiornamento."
+        return f"La notizia segnala: {title_clean}."
+
+    async def _normalize_news_extras_payload(self, payload: dict[str, str]) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for extra, value in (payload or {}).items():
+            normalized[extra] = await self._normalize_single_news_extra(extra, value)
+        return normalized
+
+    async def _normalize_single_news_extra(self, extra: str, value: str) -> str:
+        cleaned = self._sanitize_news_input_text(value)
+        if not cleaned:
+            logger.info("news_extra_fallback_used extra=%s reason=empty_content", extra)
+            return _NEWS_EXTRA_ITALIAN_FALLBACKS.get(extra, "")
+        if self._looks_italian_text(cleaned):
+            return cleaned
+        if extra == "canzone":
+            title_artist = cleaned.split("\n", 1)[0].strip()
+            title_artist = title_artist.split(". ", 1)[0].strip() or cleaned
+            return f"{title_artist}\nCommento del giorno in italiano dalla regia di Barcellometro."
+        translated = ""
+        if self._ai is not None and self._ai.is_enabled():
+            prompt = (
+                f"Adatta in italiano naturale questo contenuto per l'extra '{extra}'. "
+                "Mantieni il senso originale, massimo 2 frasi, niente meta-commenti.\n"
+                f"Testo: {cleaned}"
+            )
+            try:
+                raw = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
+                translated = self._sanitize_editorial_text(raw or "")
+            except Exception as exc:
+                logger.debug("news_extra_translation_failed extra=%s error=%s", extra, exc.__class__.__name__)
+        if translated and self._looks_italian_text(translated):
+            logger.info("news_extra_language_normalized extra=%s source_lang=en target_lang=it", extra)
+            return translated
+        logger.info("news_extra_fallback_used extra=%s", extra)
+        return _NEWS_EXTRA_ITALIAN_FALLBACKS.get(extra, cleaned)
+
+    @staticmethod
+    def _looks_italian_text(text: str) -> bool:
+        lowered = str(text or "").lower()
+        if not lowered:
+            return False
+        italian_markers = (" che ", " non ", " con ", " per ", " una ", " il ", " la ", " oggi ", " del ")
+        english_markers = (" the ", " and ", " with ", " from ", " this ", " that ", " today ", " joke ", " meme ")
+        it_score = sum(1 for marker in italian_markers if marker in f" {lowered} ")
+        en_score = sum(1 for marker in english_markers if marker in f" {lowered} ")
+        return it_score >= max(1, en_score)
 
     async def _rewrite_weather_payload(self, payload: dict[str, Any]) -> str | None:
         used_ai = False

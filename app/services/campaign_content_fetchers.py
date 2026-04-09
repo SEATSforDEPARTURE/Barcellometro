@@ -7,6 +7,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from html import unescape
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -75,6 +76,11 @@ NEWS_SOURCE_MAP = {entry["value"]: entry["url"] for entry in NEWS_SOURCE_CATALOG
 SUPPORTED_NEWS_CATEGORIES = [entry["value"] for entry in NEWS_CATEGORY_CATALOG]
 NEWS_CATEGORY_ORDER = {category: index for index, category in enumerate(SUPPORTED_NEWS_CATEGORIES)}
 logger = logging.getLogger(__name__)
+
+_NEWS_FEED_JUNK_RE = re.compile(
+    r"(?i)\b(?:continua a leggere|leggi anche|clicca qui|read more|continua su|guarda il video)\b[^\n.?!]*"
+)
+_NEWS_SOURCE_TRAIL_RE = re.compile(r"(?i)\bfonte\s*:[^\n]*")
 
 NEWS_CATEGORY_TAXONOMY: dict[str, dict[str, Any]] = {
     "cronaca": {
@@ -479,6 +485,18 @@ def _http_get(url: str, *, timeout: float = 10.0) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
+def sanitize_news_feed_text(text: str) -> str:
+    cleaned = unescape(str(text or ""))
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = _NEWS_FEED_JUNK_RE.sub(" ", cleaned)
+    cleaned = _NEWS_SOURCE_TRAIL_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"(?im)^\s*-\s*", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n-•")
+    cleaned = re.sub(r"\s+([.?!,;:])", r"\1", cleaned)
+    cleaned = re.sub(r"([.?!])\s*[.?!]+", r"\1", cleaned)
+    return cleaned
+
+
 def _normalize_source_tokens(sources: list[str], defaults: list[str]) -> list[str]:
     tokens = sources or defaults
     normalized: list[str] = []
@@ -641,7 +659,7 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
             for node in nodes:
                 title = (node.findtext("title") or "").strip()
                 link = (node.findtext("link") or "").strip()
-                description = re.sub(r"\s+", " ", (node.findtext("description") or "").strip())
+                description = sanitize_news_feed_text((node.findtext("description") or "").strip())
                 raw_categories = [str(cat.text or "").strip() for cat in node.findall("category") if str(cat.text or "").strip()]
                 if not raw_categories:
                     raw_categories = [(node.findtext("category") or "varie").strip()]
