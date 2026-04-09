@@ -350,27 +350,33 @@ def _overview_now(payload: dict[str, Any]) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _valid_news_items(items: Any) -> list[dict[str, Any]]:
-    valid: list[dict[str, Any]] = []
-    if not isinstance(items, list):
-        return valid
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        title = sanitize_plain_text(str(item.get("title") or ""))
-        if title:
-            valid.append(item)
-    return valid
-
-
-def _normalized_story_identity(item: dict[str, Any]) -> str:
-    link = str(item.get("link") or "").strip().lower().rstrip("/")
-    if link:
-        return f"url:{link}"
-    title = sanitize_plain_text(str(item.get("title") or "")).lower()
+def _news_identity(item: dict[str, Any]) -> str:
+    link = " ".join(str(item.get("link") or "").strip().split())
+    normalized_link = link.lower().rstrip("/")
+    if normalized_link:
+        return f"url:{normalized_link}"
+    title = " ".join(sanitize_plain_text(str(item.get("title") or "")).lower().split())
     if title:
         return f"title:{title}"
     return ""
+
+
+def _is_valid_news_item(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    title = sanitize_plain_text(str(item.get("title") or ""))
+    if not title:
+        return False
+    link = str(item.get("link") or "").strip()
+    if link:
+        return True
+    return bool(_first_real_news_sentences(item).strip())
+
+
+def _valid_news_items(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if _is_valid_news_item(item)]
 
 
 def _parse_news_datetime(raw: Any) -> datetime | None:
@@ -382,27 +388,6 @@ def _parse_news_datetime(raw: Any) -> datetime | None:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
         return None
-
-
-def _news_item_sort_key(item: dict[str, Any]) -> tuple[float, float]:
-    published = _parse_news_datetime(item.get("published_at")) or datetime(1970, 1, 1, tzinfo=timezone.utc)
-    quality = len(sanitize_plain_text(str(item.get("title") or ""))) + len(_build_news_item_summary(item, display=""))
-    return (published.timestamp(), float(quality))
-
-
-def _score_news_item(item: dict[str, Any], *, now_utc: datetime) -> float:
-    title = sanitize_plain_text(str(item.get("title") or ""))
-    summary = _build_news_item_summary(item, display="")
-    source = str(item.get("source") or "").lower()
-    published = _parse_news_datetime(item.get("published_at"))
-    age_hours = 72.0
-    if published is not None:
-        age_hours = max(0.0, (now_utc - published.astimezone(timezone.utc)).total_seconds() / 3600.0)
-    recency_score = max(0.0, 40.0 - min(age_hours, 40.0))
-    title_quality = min(len(title), 120) / 4.0
-    summary_quality = min(len(summary), 220) / 8.0
-    reliability = 6.0 if any(token in source for token in ["ansa", "repubblica", "corriere", "ilpost"]) else 0.0
-    return recency_score + title_quality + summary_quality + reliability
 
 
 def _build_single_news_field_value(item: dict[str, Any], *, display: str) -> str:
@@ -419,58 +404,179 @@ def _build_single_news_field_value(item: dict[str, Any], *, display: str) -> str
     return _format_news_item_block(item, display=display, numbered=False, index=0, max_summary_chars=120)[:_NEWS_FIELD_HARD_LIMIT]
 
 
-def _iter_all_news_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _iter_configured_editorial_categories(payload: dict[str, Any]) -> list[str]:
+    categories = payload.get("categories", {})
+    if not isinstance(categories, dict):
+        return []
+    configured = payload.get("configured_categories")
+    ordered: list[str]
+    if isinstance(configured, list):
+        ordered = [str(category).strip() for category in configured]
+    else:
+        ordered = [str(category).strip() for category in categories.keys()]
+    normalized_available = {str(category).strip().lower(): str(category) for category in categories.keys()}
+    selected: list[str] = []
+    seen: set[str] = set()
+    for category in ordered:
+        key = category.lower()
+        if not key or key == "varie":
+            continue
+        mapped = normalized_available.get(key)
+        if mapped is None:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(mapped)
+    return selected
+
+
+def _collect_deduped_news_pool(payload: dict[str, Any]) -> list[dict[str, Any]]:
     categories = payload.get("categories", {})
     if not isinstance(categories, dict):
         return []
     merged: list[dict[str, Any]] = []
-    for items in categories.values():
-        merged.extend(_valid_news_items(items))
-    deduped: list[dict[str, Any]] = []
+    for category_items in categories.values():
+        merged.extend(_valid_news_items(category_items))
+    pool: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in sorted(merged, key=_news_item_sort_key, reverse=True):
-        key = _normalized_story_identity(item)
+    for item in merged:
+        key = _news_identity(item)
         if not key or key in seen:
             continue
         seen.add(key)
-        deduped.append(item)
-    return deduped
+        pool.append(item)
+    return pool
 
 
-def _select_editorial_categories(
-    payload: dict[str, Any],
-    *,
-    excluded_story_keys: set[str],
-) -> list[tuple[str, str, str, dict[str, Any]]]:
-    selected: list[tuple[str, str, str, dict[str, Any]]] = []
+def _collect_news_identity_counts(payload: dict[str, Any]) -> dict[str, int]:
     categories = payload.get("categories", {})
     if not isinstance(categories, dict):
-        return selected
-    configured = payload.get("configured_categories")
-    configured_order = [str(category).strip().lower() for category in configured] if isinstance(configured, list) else []
-    if not configured_order:
-        configured_order = [str(cat).strip().lower() for cat in categories.keys()]
-    available = {str(category).strip().lower(): category for category in categories.keys()}
-    for configured_category in configured_order:
-        mapped_category = available.get(configured_category)
-        if mapped_category is None:
-            continue
-        valid_items = sorted(_valid_news_items(categories.get(mapped_category)), key=_news_item_sort_key, reverse=True)
-        chosen_item: dict[str, Any] | None = None
-        for item in valid_items:
-            key = _normalized_story_identity(item)
-            if not key or key in excluded_story_keys:
+        return {}
+    counts: dict[str, int] = {}
+    for category_items in categories.values():
+        for item in _valid_news_items(category_items):
+            key = _news_identity(item)
+            if not key:
                 continue
-            chosen_item = item
-            excluded_story_keys.add(key)
-            break
-        if chosen_item is None:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _news_identity_counts(pool: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in pool:
+        key = _news_identity(item)
+        if not key:
             continue
-        display = get_category_display_name(mapped_category)
-        selected.append((mapped_category, display, get_category_emoji(mapped_category), chosen_item))
-        if len(selected) >= _NEWS_MAX_EDITORIAL_CATEGORIES:
-            break
-    return selected
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _select_breaking_news_item(pool: list[dict[str, Any]], *, identity_counts: dict[str, int] | None = None) -> dict[str, Any] | None:
+    if not pool:
+        return None
+    dated = [item for item in pool if _parse_news_datetime(item.get("published_at")) is not None]
+    if dated:
+        return max(
+            dated,
+            key=lambda item: (_parse_news_datetime(item.get("published_at")) or datetime(1970, 1, 1, tzinfo=timezone.utc)).timestamp(),
+        )
+    counts = identity_counts or _news_identity_counts(pool)
+    for item in pool:
+        key = _news_identity(item)
+        if key and counts.get(key, 0) == 1:
+            return item
+    return pool[0]
+
+
+def _score_featured_news_item(item: dict[str, Any], *, now_utc: datetime) -> tuple[float, float, float]:
+    title_len = len(sanitize_plain_text(str(item.get("title") or "")))
+    summary_len = len(_build_news_item_summary(item, display=""))
+    published = _parse_news_datetime(item.get("published_at"))
+    recency = 0.0
+    if published is not None:
+        age_hours = max(0.0, (now_utc - published.astimezone(timezone.utc)).total_seconds() / 3600.0)
+        recency = max(0.0, 48.0 - min(age_hours, 48.0))
+    return (recency, float(min(summary_len, 240)), float(min(title_len, 120)))
+
+
+def _select_featured_news_item(
+    pool: list[dict[str, Any]],
+    *,
+    used_ids: set[str],
+    now_utc: datetime,
+    identity_counts: dict[str, int] | None = None,
+    discouraged_ids: set[str] | None = None,
+) -> dict[str, Any] | None:
+    counts = identity_counts or _news_identity_counts(pool)
+    candidates = [item for item in pool if (key := _news_identity(item)) and key not in used_ids]
+    if not candidates:
+        return None
+    discouraged = discouraged_ids or set()
+    preferred = [item for item in candidates if _news_identity(item) not in discouraged]
+    candidate_pool = preferred if preferred else candidates
+    return max(
+        candidate_pool,
+        key=lambda item: (_score_featured_news_item(item, now_utc=now_utc), 1 if counts.get(_news_identity(item), 0) == 1 else 0),
+    )
+
+
+def _select_editorial_category_item(
+    category_items: Any,
+    *,
+    top_used_ids: set[str],
+    category_used_ids: set[str],
+    allow_top_duplicates: bool = False,
+) -> dict[str, Any] | None:
+    fallback: dict[str, Any] | None = None
+    for item in _valid_news_items(category_items):
+        key = _news_identity(item)
+        if not key or key in category_used_ids:
+            continue
+        if fallback is None:
+            fallback = item
+        if key in top_used_ids and not allow_top_duplicates:
+            continue
+        return item
+    return fallback if allow_top_duplicates else None
+
+
+def _build_news_extra_fields(config: dict[str, Any], *, base_dt: datetime) -> list[tuple[str, str]]:
+    extras_enabled = _normalize_news_extras(config.get("extras_json"))
+    fields: list[tuple[str, str]] = []
+    for extra in NEWS_EXTRA_ORDER:
+        if extra not in extras_enabled:
+            continue
+        title_text, emoji = NEWS_EXTRA_FIELD_TITLES[extra]
+        content = _daily_rotating_pick(NEWS_EXTRA_CATALOG[extra], base_dt=base_dt)
+        if not content:
+            continue
+        label_text = title_text
+        if label_text.startswith(f"{emoji} "):
+            label_text = label_text[len(emoji) + 1 :]
+        fields.append((format_standard_field_name(label_text, emoji=emoji), content[:_NEWS_FIELD_HARD_LIMIT]))
+    return fields
+
+
+def _first_editorial_story_ids(payload: dict[str, Any]) -> set[str]:
+    categories = payload.get("categories", {})
+    if not isinstance(categories, dict):
+        return set()
+    first_ids: set[str] = set()
+    for category in _iter_configured_editorial_categories(payload):
+        first_item = _select_editorial_category_item(
+            categories.get(category),
+            top_used_ids=set(),
+            category_used_ids=set(),
+            allow_top_duplicates=True,
+        )
+        if first_item is None:
+            continue
+        story_id = _news_identity(first_item)
+        if story_id:
+            first_ids.add(story_id)
+    return first_ids
 
 
 def _daily_rotating_pick(pool: list[str], *, base_dt: datetime) -> str:
@@ -530,10 +636,9 @@ def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, 
 
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
-    title = "📰 HAMSTER NEWS"
     now_utc = _overview_now(payload)
     edition_label, daypart = news_edition_label_for_datetime(now_utc)
-    overview = discord.Embed(title=format_standard_title(f"{title} • {edition_label}"), color=color)
+    overview = discord.Embed(title=format_standard_title(f"📰 HAMSTER NEWS • {edition_label}"), color=color)
     overview.description = format_standard_description(
         (
             f"🐹 Buona **{daypart}**: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
@@ -542,52 +647,67 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         ),
         blank_line_before_fields=True,
     )
-    all_items = _iter_all_news_items(payload)
-    excluded_keys: set[str] = set()
-    latest_item = all_items[0] if all_items else None
+    all_items = _collect_deduped_news_pool(payload)
+    identity_counts = _collect_news_identity_counts(payload) or _news_identity_counts(all_items)
+    discouraged_featured_ids = _first_editorial_story_ids(payload)
+    used_ids: set[str] = set()
+    latest_item = _select_breaking_news_item(all_items, identity_counts=identity_counts)
     if latest_item is not None:
-        latest_key = _normalized_story_identity(latest_item)
+        latest_key = _news_identity(latest_item)
         if latest_key:
-            excluded_keys.add(latest_key)
+            used_ids.add(latest_key)
         overview.add_field(
             name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
             value=_build_single_news_field_value(latest_item, display="ULTIM'ORA"),
             inline=False,
         )
-    highlighted: dict[str, Any] | None = None
-    for item in sorted(all_items, key=lambda candidate: _score_news_item(candidate, now_utc=now_utc), reverse=True):
-        item_key = _normalized_story_identity(item)
-        if not item_key or item_key in excluded_keys:
-            continue
-        highlighted = item
-        excluded_keys.add(item_key)
-        break
+    highlighted = _select_featured_news_item(
+        all_items,
+        used_ids=used_ids,
+        now_utc=now_utc,
+        identity_counts=identity_counts,
+        discouraged_ids=discouraged_featured_ids,
+    )
     if highlighted is not None:
+        highlighted_key = _news_identity(highlighted)
+        if highlighted_key:
+            used_ids.add(highlighted_key)
         overview.add_field(
             name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
             value=_build_single_news_field_value(highlighted, display="IN EVIDENZA"),
             inline=False,
         )
-    editorial_categories = _select_editorial_categories(payload, excluded_story_keys=excluded_keys)
+    editorial_categories: list[tuple[str, str, str, dict[str, Any]]] = []
+    categories = payload.get("categories", {})
+    if isinstance(categories, dict):
+        configured_editorial_categories = _iter_configured_editorial_categories(payload)
+        allow_top_duplicates = True
+        top_used_ids = set(used_ids)
+        category_used_ids: set[str] = set()
+        for category in configured_editorial_categories:
+            selected_item = _select_editorial_category_item(
+                categories.get(category),
+                top_used_ids=top_used_ids,
+                category_used_ids=category_used_ids,
+                allow_top_duplicates=allow_top_duplicates,
+            )
+            if selected_item is None:
+                continue
+            story_id = _news_identity(selected_item)
+            if story_id:
+                category_used_ids.add(story_id)
+            display = get_category_display_name(category)
+            editorial_categories.append((category, display, get_category_emoji(category), selected_item))
+            if len(editorial_categories) >= _NEWS_MAX_EDITORIAL_CATEGORIES:
+                break
     for _, display, _, item in editorial_categories:
         overview.add_field(
             name=format_standard_field_name(f"{display} IN PRIMO PIANO"),
             value=_build_single_news_field_value(item, display=display),
             inline=False,
         )
-    extras_enabled = _normalize_news_extras(config.get("extras_json"))
-    for extra in NEWS_EXTRA_ORDER:
-        if extra not in extras_enabled:
-            continue
-        title_text, emoji = NEWS_EXTRA_FIELD_TITLES[extra]
-        content = _daily_rotating_pick(NEWS_EXTRA_CATALOG[extra], base_dt=now_utc)
-        if not content:
-            continue
-        overview.add_field(
-            name=format_standard_field_name(title_text, emoji=emoji),
-            value=content[:_NEWS_FIELD_HARD_LIMIT],
-            inline=False,
-        )
+    for field_name, field_value in _build_news_extra_fields(config, base_dt=now_utc):
+        overview.add_field(name=field_name, value=field_value, inline=False)
     next_run_field = _next_news_run_field(config, generated_at=now_utc)
     if next_run_field:
         overview.add_field(
