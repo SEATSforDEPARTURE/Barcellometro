@@ -763,6 +763,17 @@ def _contains_keyword_blob(blob: str, keyword: str) -> bool:
     return re.search(rf"\b{re.escape(needle)}\b", blob) is not None
 
 
+def _is_known_news_category(category: str) -> bool:
+    normalized = slugify_label(category).replace("_", " ")
+    return normalized in _CATEGORY_MATCH_KEYWORDS
+
+
+def _category_keyword_hits(blob: str, category: str) -> int:
+    normalized = slugify_label(category).replace("_", " ")
+    keywords = _CATEGORY_MATCH_KEYWORDS.get(normalized, ())
+    return sum(1 for keyword in keywords if _contains_keyword_blob(blob, keyword))
+
+
 def _score_item_category_match(item: dict[str, Any], category: str) -> float:
     requested = slugify_label(category).replace("_", " ")
     blob = _tokenize_news_blob(item)
@@ -804,10 +815,33 @@ def _score_item_category_match(item: dict[str, Any], category: str) -> float:
     return round(score, 3)
 
 
-def _item_matches_requested_category(item: dict[str, Any], category: str) -> bool:
+def _item_matches_requested_category(item: dict[str, Any], category: str, *, strict: bool = False) -> bool:
     requested = slugify_label(category).replace("_", " ")
+    if strict:
+        score = _score_item_category_match(item, requested)
+        return score >= 2.0
+    if not _is_known_news_category(requested):
+        # For custom/synthetic categories we trust the payload bucket as source-of-truth.
+        return True
+    blob = _tokenize_news_blob(item)
+    requested_hits = _category_keyword_hits(blob, requested)
+    strongest_other_hits = 0
+    strongest_other_category = ""
+    for other_category in _CATEGORY_MATCH_KEYWORDS:
+        if other_category == requested:
+            continue
+        hits = _category_keyword_hits(blob, other_category)
+        if hits > strongest_other_hits:
+            strongest_other_hits = hits
+            strongest_other_category = other_category
+    # Soft matching: accept bucket items by default, reject only clear lexical mismatches.
+    if strongest_other_hits >= 2 and strongest_other_hits >= requested_hits + 2:
+        assigned = slugify_label(str(item.get("category") or "")).replace("_", " ")
+        if assigned and assigned not in (requested, strongest_other_category):
+            return True
+        return False
     score = _score_item_category_match(item, requested)
-    return score >= 2.0
+    return score >= 0.5
 
 
 def _collect_deduped_news_pool(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -909,11 +943,19 @@ def _select_editorial_category_item(
 ) -> dict[str, Any] | None:
     for item in _valid_news_items(category_items):
         key = _news_identity(item)
-        if not key or key in used_ids:
+        if not key:
+            logger.info("news_category_slot_candidate_skipped category=%s reason=missing_identity", category)
+            continue
+        if key in used_ids:
+            logger.info(
+                "news_category_slot_candidate_skipped category=%s reason=already_used title=%s",
+                category,
+                sanitize_plain_text(str(item.get("title") or ""))[:100],
+            )
             continue
         if not _item_matches_requested_category(item, category):
             logger.info(
-                "news_category_slot_rejected category=%s title=%s reason=weak_category_match score=%.2f",
+                "news_category_slot_candidate_skipped category=%s reason=category_mismatch title=%s score=%.2f",
                 category,
                 sanitize_plain_text(str(item.get("title") or ""))[:100],
                 _score_item_category_match(item, category),
@@ -959,7 +1001,7 @@ def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 used_ids=used_ids,
             )
             if selected_item is None:
-                logger.info("news_category_slot_skipped category=%s reason=no_strong_match", category)
+                logger.info("news_category_slot_skipped category=%s reason=no_valid_unused_items", category)
                 continue
             story_id = _news_identity(selected_item)
             if story_id:
