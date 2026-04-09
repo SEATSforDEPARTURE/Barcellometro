@@ -142,3 +142,23 @@ def test_fetch_news_content_fallback_only_when_no_classifiable_items(monkeypatch
 
     payload = fetchers.fetch_news_content(["ansa"], ["cronaca"])
     assert payload["categories"] == {}
+
+
+def test_fetch_news_content_parses_pubdate_in_published_at(monkeypatch) -> None:
+    rss_xml = """
+    <rss><channel>
+        <item>
+            <title>Arrestato dopo un blitz</title>
+            <link>https://example.com/date</link>
+            <description>Cronaca locale.</description>
+            <category>Cronaca</category>
+            <pubDate>Thu, 09 Apr 2026 10:15:00 +0200</pubDate>
+        </item>
+    </channel></rss>
+    """
+    monkeypatch.setattr(fetchers, "_resolve_news_sources", lambda _sources: ["https://example.com/feed.xml"])
+    monkeypatch.setattr(fetchers, "_http_get", lambda _url: rss_xml)
+
+    payload = fetchers.fetch_news_content(["ansa"], ["cronaca"])
+    first = payload["categories"]["cronaca"][0]
+    assert first["published_at"].endswith("+00:00")

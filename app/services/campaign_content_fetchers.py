@@ -7,6 +7,8 @@ import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 NEWS_SOURCE_CATALOG = [
@@ -544,13 +546,25 @@ def similarity_title(a: str, b: str) -> float:
     return jaccard
 
 
-def _item_quality(item: dict[str, str]) -> tuple[int, int]:
+def _parse_published_at(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _item_quality(item: dict[str, Any]) -> tuple[float, int, int]:
     source = (item.get("source") or "").lower()
     reliability_bonus = 2 if any(k in source for k in ["ansa", "repubblica", "corriere", "ilpost"]) else 0
-    return (len(item.get("summary") or ""), reliability_bonus)
+    published = _parse_published_at(str(item.get("published_at") or "")) or datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return (published.timestamp(), len(item.get("summary") or ""), reliability_bonus)
 
 
-def dedupe_news_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
+def dedupe_news_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: list[dict[str, str]] = []
     key_index: dict[str, int] = {}
     for item in items:
@@ -573,6 +587,26 @@ def dedupe_news_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
         deduped.append(item)
     return deduped
 
+def _extract_published_at(node: ET.Element) -> str | None:
+    for field in ("pubDate", "published", "updated", "dc:date"):
+        raw = (node.findtext(field) or "").strip()
+        if not raw:
+            continue
+        try:
+            if field == "pubDate":
+                parsed = parsedate_to_datetime(raw)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
 def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, Any]:
     normalized_categories = [
         normalized
@@ -586,7 +620,7 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
         effective_sources,
         normalized_categories,
     )
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     attempted: list[str] = []
     used_sources: list[str] = []
     discarded_count = 0
@@ -611,6 +645,7 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                     raw_categories=raw_categories,
                     source=source,
                 )
+                published_at = _extract_published_at(node)
                 matched_categories = (
                     [cat for cat in normalized_categories if cat in classified_categories]
                     if normalized_categories
@@ -643,6 +678,7 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                             "summary": description[:500],
                             "category": selected_category or "varie",
                             "source": urllib.parse.urlparse(source).netloc or source,
+                            "published_at": published_at,
                         }
                     )
             if found_for_source:
@@ -687,6 +723,7 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
         "used_sources": used_sources,
         "configured_sources": sources,
         "configured_categories": normalized_categories,
+        "all_items": dedupe_news_items(items),
     }
 
 
