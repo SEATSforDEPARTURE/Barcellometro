@@ -106,8 +106,8 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Notizie uniche aggregate" not in description
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
-    assert "**Che ci dice il mondo quest'oggi?**" in description
-    assert any(daypart in description.lower() for daypart in ["mattina", "pomeriggio", "sera", "notte"])
+    assert "**Che ci racconta il mondo oggi?**" in description
+    assert any(greeting in description for greeting in ["Buon mattino", "Buon pomeriggio", "Buonasera", "Buona notte"])
     assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
 
 
@@ -172,7 +172,7 @@ def test_news_category_item_format_matches_single_item_field_format() -> None:
     assert "**[Titolo 2](https://example.com/2)**" not in first_field_value
     assert overview.fields[0].name == "⚡ __**ULTIM'ORA**__"
     assert overview.fields[1].name == "🌟 __**IN EVIDENZA**__"
-    assert overview.fields[2].name == "__**CRONACA IN PRIMO PIANO**__"
+    assert overview.fields[2].name == "🕵️ __**CRONACA IN PRIMO PIANO**__"
 
     for idx, field in enumerate(overview.fields):
         value = field.value or ""
@@ -192,7 +192,7 @@ def test_news_edition_label_coverage() -> None:
 
 def test_news_embed_supports_extras_and_next_edition_for_recurring() -> None:
     news = build_news_embeds(
-        {"interval_minutes": 30, "extras_json": '["barzelletta","aforisma","canzone","meme"]'},
+        {"next_scheduled_run_at": "2026-04-09T09:30:00+00:00", "extras_json": '["barzelletta","aforisma","canzone","meme"]'},
         {
             "generated_at": "2026-04-09T08:00:00+00:00",
             "categories": {"cronaca": [{"title": "Titolo 1", "summary": "S1", "source": "ansa.it", "link": "https://example.com/1"}]},
@@ -361,9 +361,9 @@ def test_news_overview_selection_uses_configured_order_caps_at_five_categories_a
     assert names[0] == "⚡ __**ULTIM'ORA**__"
     assert names[1] == "🌟 __**IN EVIDENZA**__"
     assert names[2:] == [
-        "__**CAT1 IN PRIMO PIANO**__",
-        "__**CAT2 IN PRIMO PIANO**__",
-        "__**CAT3 IN PRIMO PIANO**__",
+        "📌 __**CAT1 IN PRIMO PIANO**__",
+        "📌 __**CAT2 IN PRIMO PIANO**__",
+        "📌 __**CAT3 IN PRIMO PIANO**__",
     ]
     assert all(f"CAT{i}" not in " ".join(name.upper() for name in names) for i in range(4, 13))
     assert all("VARIE" not in name.upper() for name in names)
@@ -393,7 +393,7 @@ def test_news_overview_avoids_duplicate_main_story_across_categories_and_handles
 
     assert names[0] == "⚡ __**ULTIM'ORA**__"
     assert names[1] == "🌟 __**IN EVIDENZA**__"
-    assert "__**SPORT IN PRIMO PIANO**__" in names
+    assert "⚽ __**SPORT IN PRIMO PIANO**__" in names
     assert any("Titolo condiviso" in value for value in values)
     assert any("Sport esclusivo" in value for value in values)
     assert sum("Titolo condiviso" in value for value in values) == 1

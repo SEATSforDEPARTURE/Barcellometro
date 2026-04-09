@@ -1,5 +1,13 @@
 from app.services import campaign_content_fetchers as fetchers
-from app.services.campaign_content_fetchers import _resolve_news_sources, classify_news_item
+from app.services.campaign_content_fetchers import (
+    _resolve_news_sources,
+    classify_news_item,
+    fetch_daily_joke,
+    fetch_daily_meme,
+    fetch_daily_news_extras,
+    fetch_daily_quote,
+    fetch_daily_song,
+)
 
 
 def test_resolve_news_sources_accepts_display_labels_and_domains() -> None:
@@ -162,3 +170,41 @@ def test_fetch_news_content_parses_pubdate_in_published_at(monkeypatch) -> None:
     payload = fetchers.fetch_news_content(["ansa"], ["cronaca"])
     first = payload["categories"]["cronaca"][0]
     assert first["published_at"].endswith("+00:00")
+
+
+def test_fetch_daily_extras_live_success(monkeypatch) -> None:
+    monkeypatch.setattr(fetchers, "_http_get_json", lambda url: [{"q": "Citazione", "a": "Autore"}] if "zenquotes" in url else {"type": "single", "joke": "Battuta"} if "jokeapi" in url else {"feed": {"entry": [{"im:name": {"label": "Song"}, "im:artist": {"label": "Artist"}}]}} if "itunes" in url else {"data": {"children": [{"data": {"title": "Meme live"}}]}})
+    assert fetch_daily_joke() == "Battuta"
+    assert fetch_daily_quote() == "Citazione — Autore"
+    assert fetch_daily_song().startswith("Song — Artist")
+    assert fetch_daily_meme() == "Meme live"
+
+
+def test_fetch_daily_extras_secondary_fallback(monkeypatch) -> None:
+    def _fake_json(url: str):
+        if "jokeapi" in url or "zenquotes" in url or "itunes" in url or "reddit" in url:
+            raise RuntimeError("primary down")
+        if "official-joke-api" in url:
+            return {"setup": "A", "punchline": "B"}
+        if "quotable" in url:
+            return {"content": "Q", "author": "W"}
+        if "deezer" in url:
+            return {"data": [{"title": "Track", "artist": {"name": "Band"}}]}
+        if "imgflip" in url:
+            return {"data": {"memes": [{"name": "Distracted Boyfriend"}]}}
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(fetchers, "_http_get_json", _fake_json)
+    assert fetch_daily_joke() == "A B"
+    assert fetch_daily_quote() == "Q — W"
+    assert fetch_daily_song().startswith("Track — Band")
+    assert "Distracted Boyfriend" in fetch_daily_meme()
+
+
+def test_fetch_daily_extras_final_static_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(fetchers, "_http_get_json", lambda _url: (_ for _ in ()).throw(RuntimeError("no net")))
+    extras = fetch_daily_news_extras()
+    assert extras["barzelletta"]
+    assert extras["aforisma"]
+    assert extras["canzone"]
+    assert extras["meme"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import urlparse
@@ -64,20 +64,20 @@ CATEGORY_DISPLAY_NAMES = {
 }
 
 CATEGORY_EMOJIS = {
-    "cronaca": "📰",
+    "cronaca": "🕵️",
     "politica": "🏛️",
     "sport": "⚽",
     "spettacolo": "🎭",
     "gossip": "👀",
     "tecnologia": "💻",
     "tech": "💻",
-    "economia": "💸",
+    "economia": "💼",
     "mondo": "🌍",
-    "viral": "🚀",
-    "trash": "🐔",
-    "curiosita": "✨",
-    "curiosità": "✨",
-    "varie": "📌",
+    "viral": "📈",
+    "trash": "🗑️",
+    "curiosita": "🤔",
+    "curiosità": "🤔",
+    "varie": "🗂️",
 }
 
 WEATHER_AREA_LABELS = {
@@ -200,26 +200,28 @@ NEWS_EXTRA_FIELD_TITLES = {
     "meme": ("🖼️ MEME DEL GIORNO", "🖼️"),
 }
 NEWS_EXTRA_CATALOG = {
-    "barzelletta": [
-        "Perché il criceto non litiga mai col meteo? Perché tiene sempre il sangue freddo.",
-        "Il giornalista chiede al criceto: «Hai fonti?» — «Sì, ma non le rosicchio.»",
-        "«Ultim’ora?» «No, ultima ruota: quella della mia corsa in redazione.»",
-    ],
-    "aforisma": [
-        "La chiarezza è la forma più elegante della verità.",
-        "Le notizie passano, il criterio resta.",
-        "Chi ascolta bene capisce prima del rumore.",
-    ],
-    "canzone": [
-        "Viva La Vida — Coldplay\nUna spinta epica per la prossima corsa in redazione.",
-        "La Cura — Franco Battiato\nParole misurate e atmosfera da chiusura stampa.",
-        "Heroes — David Bowie\nEnergia da prima pagina e sguardo lungo.",
-    ],
-    "meme": [
-        "Quando dici «solo un titolo» e apri 14 tab in 30 secondi.",
-        "Io: «Controllo una notizia al volo». Anche io, due ore dopo: «Edizione straordinaria».",
-        "Il criceto in regia quando arriva il breaking: modalità turbo attivata.",
-    ],
+    "barzelletta": ["Il criceto in redazione: «Promesso, oggi apro solo tre tab». Erano trenta."],
+    "aforisma": ["La notizia corre, il criterio decide la direzione."],
+    "canzone": ["Heroes — David Bowie\nEnergia da prima pagina per la ruota della redazione."],
+    "meme": ["Quando dici «chiudo in 5 minuti» e la breaking spunta al minuto 6."],
+}
+NEWS_DAYPART_COPY = {
+    "mattina": (
+        "🐹 Buon mattino: qui Barcellometro in regia, con la redazione già in corsa sulla ruota delle news. "
+        "Titoli freschi, zampette veloci e subito al punto."
+    ),
+    "pomeriggio": (
+        "🐹 Buon pomeriggio: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
+        "Titoli caldi, pochi giri di parole e dritti al punto."
+    ),
+    "sera": (
+        "🐹 Buonasera: qui Barcellometro in regia, con la redazione e le notizie che si siedono sotto i riflettori. "
+        "Facciamo ordine nel caos e vediamo cosa merita davvero attenzione."
+    ),
+    "notte": (
+        "🐹 Buona notte: qui Barcellometro ancora sveglio in redazione, con gli ultimi fruscii dal mondo prima di spegnere le luci. "
+        "Due zampate rapide e il quadro è completo."
+    ),
 }
 
 
@@ -282,6 +284,9 @@ def _news_source_line(item: dict[str, Any], *, link: str) -> str:
 
 
 def _build_news_item_summary(item: dict[str, Any], *, display: str) -> str:
+    ai_summary = sanitize_public_news_text(str(item.get("ai_summary") or ""))
+    if not _is_useless_news_text(ai_summary):
+        return _take_news_sentences(ai_summary)
     summary = sanitize_public_news_text(str(item.get("summary") or ""))
     summary = sanitize_plain_text(summary, remove_category_hint=display)
     if _is_useless_news_text(summary):
@@ -544,12 +549,16 @@ def _select_editorial_category_item(
 
 def _build_news_extra_fields(config: dict[str, Any], *, base_dt: datetime) -> list[tuple[str, str]]:
     extras_enabled = _normalize_news_extras(config.get("extras_json"))
+    extras_payload = config.get("extras_payload")
+    live_extras = extras_payload if isinstance(extras_payload, dict) else {}
     fields: list[tuple[str, str]] = []
     for extra in NEWS_EXTRA_ORDER:
         if extra not in extras_enabled:
             continue
         title_text, emoji = NEWS_EXTRA_FIELD_TITLES[extra]
-        content = _daily_rotating_pick(NEWS_EXTRA_CATALOG[extra], base_dt=base_dt)
+        content = sanitize_plain_text(str(live_extras.get(extra) or ""))
+        if not content:
+            content = _daily_rotating_pick(NEWS_EXTRA_CATALOG[extra], base_dt=base_dt)
         if not content:
             continue
         label_text = title_text
@@ -610,14 +619,24 @@ def _normalize_news_extras(raw: Any) -> list[str]:
 
 
 def _next_news_run_field(config: dict[str, Any], *, generated_at: datetime) -> str | None:
-    interval = int(config.get("interval_minutes") or 0)
-    if interval <= 0:
+    _ = generated_at
+    next_run_raw = str(config.get("next_scheduled_run_at") or "").strip()
+    if not next_run_raw:
         return None
-    next_run = generated_at.astimezone(_ITALY_TZ) + timedelta(minutes=interval)
+    try:
+        parsed = datetime.fromisoformat(next_run_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    next_run = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    next_run = next_run.astimezone(_ITALY_TZ)
     return (
         "Il criceto chiude il taccuino per ora. "
         f"Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
     )
+
+
+def _format_news_title(text: str) -> str:
+    return f"📰 {format_standard_title(text)}"
 
 
 def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, Any]]]]) -> str | None:
@@ -638,13 +657,10 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     color = resolve_color(config.get("embed_color"))
     now_utc = _overview_now(payload)
     edition_label, daypart = news_edition_label_for_datetime(now_utc)
-    overview = discord.Embed(title=format_standard_title(f"📰 HAMSTER NEWS • {edition_label}"), color=color)
+    overview = discord.Embed(title=_format_news_title(f"HAMSTER NEWS • {edition_label}"), color=color)
+    intro = NEWS_DAYPART_COPY.get(daypart, NEWS_DAYPART_COPY["pomeriggio"])
     overview.description = format_standard_description(
-        (
-            f"🐹 Buona **{daypart}**: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
-            "Titoli caldi, pochi giri di parole e dritti al punto.\n"
-            "**Che ci dice il mondo quest'oggi?**"
-        ),
+        f"{intro}\n**Che ci racconta il mondo oggi?**",
         blank_line_before_fields=True,
     )
     all_items = _collect_deduped_news_pool(payload)
@@ -700,9 +716,9 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             editorial_categories.append((category, display, get_category_emoji(category), selected_item))
             if len(editorial_categories) >= _NEWS_MAX_EDITORIAL_CATEGORIES:
                 break
-    for _, display, _, item in editorial_categories:
+    for _, display, emoji, item in editorial_categories:
         overview.add_field(
-            name=format_standard_field_name(f"{display} IN PRIMO PIANO"),
+            name=format_standard_field_name(f"{display} IN PRIMO PIANO", emoji=emoji),
             value=_build_single_news_field_value(item, display=display),
             inline=False,
         )

@@ -132,12 +132,15 @@ Regole operative:
   - `EDIZIONE POMERIDIANA` (12:00–17:59),
   - `EDIZIONE SERALE` (18:00–22:59),
   - `EDIZIONE NOTTURNA` (23:00–04:59).
+- titolo standardizzato con emoji esterna al markdown: `📰 __**HAMSTER NEWS • EDIZIONE ...**__`.
+- descrizione editoriale con copy grammaticale dedicato (`Buon mattino`, `Buon pomeriggio`, `Buonasera`, `Buona notte`).
 - struttura field news:
   1. `⚡ ULTIM'ORA` (1 notizia),
   2. `🌟 IN EVIDENZA` (1 notizia),
-  3. fino a 3 categorie configurate nello schedule come `X IN PRIMO PIANO` (1 notizia per field, ordine configurato),
-  4. extra opzionali (`BARZELLETTA`, `AFORISMA`, `CANZONE`, `MEME` del giorno),
-  5. `🔜 PROSSIMA EDIZIONE` solo per schedule ricorrenti.
+  3. fino a 3 categorie configurate nello schedule come `X IN PRIMO PIANO` con emoji categoria (1 notizia per field, ordine configurato),
+  4. extra opzionali (`BARZELLETTA`, `AFORISMA`, `CANZONE`, `MEME` del giorno) con fetch live da internet e fallback multilivello,
+  5. `🔜 PROSSIMA EDIZIONE` calcolata sulla prossima run reale tra gli schedule ricorrenti attivi della stessa campagna.
+- sintesi notizie: mini-riassunto AI (massimo 2 frasi) con tono leggero “cricetoso”; se AI fallisce viene usato fallback sanitizzato locale.
 - i comandi `/campaigns news schedule_add` e `/campaigns news schedule_edit` supportano `extras` guidati (CSV con autocomplete): `barzelletta, aforisma, canzone, meme`.
 
 ### AI centrale
