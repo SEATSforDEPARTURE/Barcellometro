@@ -358,8 +358,14 @@ def test_news_overview_selection_uses_configured_order_caps_at_five_categories_a
 
     assert len(overview.fields) == 5
     names = [field.name for field in overview.fields]
-    assert "CAT1" in names[0].upper()
-    assert "CAT6" not in " ".join(name.upper() for name in names)
+    assert names[0] == "⚡ __**ULTIM'ORA**__"
+    assert names[1] == "🌟 __**IN EVIDENZA**__"
+    assert names[2:] == [
+        "__**CAT1 IN PRIMO PIANO**__",
+        "__**CAT2 IN PRIMO PIANO**__",
+        "__**CAT3 IN PRIMO PIANO**__",
+    ]
+    assert all(f"CAT{i}" not in " ".join(name.upper() for name in names) for i in range(4, 13))
     assert all("VARIE" not in name.upper() for name in names)
     assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
@@ -383,8 +389,11 @@ def test_news_overview_avoids_duplicate_main_story_across_categories_and_handles
     news = build_news_embeds({}, payload)
     overview = news[0]
     values = [field.value for field in overview.fields]
+    names = [field.name for field in overview.fields]
 
-    assert len(overview.fields) == 2
+    assert names[0] == "⚡ __**ULTIM'ORA**__"
+    assert names[1] == "🌟 __**IN EVIDENZA**__"
+    assert "__**SPORT IN PRIMO PIANO**__" in names
     assert any("Titolo condiviso" in value for value in values)
     assert any("Sport esclusivo" in value for value in values)
     assert sum("Titolo condiviso" in value for value in values) == 1
