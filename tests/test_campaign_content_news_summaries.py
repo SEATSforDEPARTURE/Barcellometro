@@ -1,6 +1,7 @@
 import re
 
 from app.services.campaign_content_formatter import (
+    _build_news_item_summary,
     _build_news_summary_body,
     _classify_news_tone,
     _compose_news_embed_summary,
@@ -79,3 +80,28 @@ def test_news_fallback_pipeline_stays_structured_when_ai_body_missing() -> None:
     summary = _normalize_news_summary_for_embed("Dettagli in aggiornamento.", item=item, display="CRONACA")
     assert _sentence_count(summary) >= 2
     assert summary.endswith(("👀", "🐹", "🤹", "🫥", "😔"))
+
+
+def test_news_tail_comments_are_unique_within_same_embed_serious_items() -> None:
+    used: set[str] = set()
+    items = [
+        {"title": "Incidente grave in tangenziale con vittime", "summary": "Dinamica al vaglio.", "source": "ansa.it", "link": f"https://e/{idx}"}
+        for idx in range(5)
+    ]
+    tails = []
+    for idx, item in enumerate(items):
+        summary = _build_news_item_summary(item, display="CRONACA", used_tail_comments=used, seed_key=f"s-{idx}")
+        tails.append(summary.split(". ")[-1].strip())
+    assert len(set(tails)) == len(tails)
+    assert all(tail.endswith(("🫥", "😔")) for tail in tails)
+
+
+def test_news_tail_comments_follow_tone_bucket_with_mixed_items() -> None:
+    used: set[str] = set()
+    serious = {"title": "Omicidio in centro, aperta indagine", "summary": "Gli investigatori stanno ricostruendo i fatti.", "source": "ansa.it", "link": "https://e/serious"}
+    standard = {"title": "Nuovo smartphone pieghevole in arrivo", "summary": "Presentazione prevista a giugno.", "source": "wired.it", "link": "https://e/standard"}
+    serious_summary = _build_news_item_summary(serious, display="CRONACA", used_tail_comments=used, seed_key="serious")
+    standard_summary = _build_news_item_summary(standard, display="TECNOLOGIA", used_tail_comments=used, seed_key="standard")
+    assert serious_summary.endswith(("🫥", "😔"))
+    assert standard_summary.endswith(("👀", "🐹", "🤹"))
+    assert serious_summary.split(". ")[-1] != standard_summary.split(". ")[-1]

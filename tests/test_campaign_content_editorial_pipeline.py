@@ -104,11 +104,11 @@ def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
     payload = {
         "configured_categories": ["economia", "sport", "cronaca", "politica", "tecnologia"],
         "categories": {
-            "cronaca": [{"title": "Cronaca A", "summary": "S", "source": "ansa.it", "link": "https://example.com/1"}],
-            "sport": [{"title": "Sport A", "summary": "S", "source": "ansa.it", "link": "https://example.com/2"}],
-            "economia": [{"title": "Economia A", "summary": "S", "source": "ansa.it", "link": "https://example.com/3"}],
-            "politica": [{"title": "Politica A", "summary": "S", "source": "ansa.it", "link": "https://example.com/4"}],
-            "tecnologia": [{"title": "Tech A", "summary": "S", "source": "ansa.it", "link": "https://example.com/5"}],
+            "cronaca": [{"title": "Cronaca: arresto dopo indagini della procura", "summary": "S", "source": "ansa.it", "link": "https://example.com/1"}],
+            "sport": [{"title": "Sport: partita decisa al 90esimo", "summary": "S", "source": "ansa.it", "link": "https://example.com/2"}],
+            "economia": [{"title": "Economia A", "summary": "Mercati e inflazione in primo piano", "source": "ansa.it", "link": "https://example.com/3"}],
+            "politica": [{"title": "Politica: scontro tra governo e opposizione", "summary": "S", "source": "ansa.it", "link": "https://example.com/4"}],
+            "tecnologia": [{"title": "Nuovo software AI per smartphone", "summary": "S", "source": "ansa.it", "link": "https://example.com/5"}],
         },
     }
     fields = [field.name for field in build_news_embeds({}, payload)[0].fields]
@@ -117,12 +117,74 @@ def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
     assert all("IN PRIMO PIANO" in name for name in editorial)
 
 
+def test_news_embed_tail_comments_not_repeated_across_slots() -> None:
+    payload = {
+        "configured_categories": ["cronaca", "politica", "tecnologia"],
+        "categories": {
+            "cronaca": [{"title": "Tragedia in montagna con due vittime", "summary": "Soccorsi sul posto.", "source": "ansa.it", "link": "https://example.com/c1"}],
+            "politica": [{"title": "Scontro in Parlamento sulla riforma", "summary": "Dibattito acceso in aula.", "source": "ansa.it", "link": "https://example.com/p1"}],
+            "tecnologia": [{"title": "Attacco informatico a una grande piattaforma", "summary": "Esperti al lavoro per il ripristino.", "source": "wired.it", "link": "https://example.com/t1"}],
+        },
+    }
+    fields = build_news_embeds({}, payload)[0].fields
+    target_fields = [f for f in fields if "ULTIM'ORA" in f.name or "IN EVIDENZA" in f.name or "IN PRIMO PIANO" in f.name]
+    tails = [str(field.value).split("• ", 1)[-1].split("`fonte:", 1)[0].strip().split(". ")[-1] for field in target_fields]
+    assert len(tails) == len(set(tails))
+
+
 def test_news_title_has_emoji_outside_markdown() -> None:
     news = build_news_embeds(
         {},
         {"generated_at": "2026-04-09T13:00:00+02:00", "categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://x"}]}},
     )
     assert news[0].title == "📰 __**HAMSTER NEWS • EDIZIONE POMERIDIANA**__"
+
+
+def test_news_category_slot_is_skipped_when_item_does_not_match_requested_category() -> None:
+    payload = {
+        "configured_categories": ["tecnologia", "politica"],
+        "categories": {
+            "cronaca": [
+                {
+                    "title": "Incidente in autostrada, traffico bloccato",
+                    "summary": "Code per chilometri e intervento dei soccorsi.",
+                    "source": "ansa.it",
+                    "link": "https://example.com/cronaca-filler-1",
+                    "published_at": "2026-04-09T08:00:00+00:00",
+                },
+                {
+                    "title": "Aggiornamento viabilità dopo il maltempo",
+                    "summary": "Chiusure e deviazioni nelle prossime ore.",
+                    "source": "ansa.it",
+                    "link": "https://example.com/cronaca-filler-2",
+                    "published_at": "2026-04-09T07:00:00+00:00",
+                },
+            ],
+            "tecnologia": [
+                {
+                    "title": "FMI rivede il PIL: crescita debole e inflazione in aumento",
+                    "summary": "Il rapporto parla di mercati, debito e banche centrali.",
+                    "source": "wired.it",
+                    "link": "https://example.com/economia-in-tech",
+                    "category": "tecnologia",
+                }
+            ],
+            "politica": [
+                {
+                    "title": "Il governo presenta un nuovo decreto in Senato",
+                    "summary": "Maggioranza e opposizione al confronto.",
+                    "source": "ansa.it",
+                    "link": "https://example.com/politica-ok",
+                    "category": "politica",
+                    "classified_categories": ["politica"],
+                }
+            ],
+        },
+    }
+    field_names = [field.name for field in build_news_embeds({}, payload)[0].fields]
+    joined = " ".join(field_names)
+    assert "TECNOLOGIA IN PRIMO PIANO" not in joined
+    assert "POLITICA IN PRIMO PIANO" in joined
 
 
 def test_news_description_uses_natural_greetings_by_daypart() -> None:

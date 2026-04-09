@@ -297,30 +297,43 @@ def classify_news_item(
     text_blob = " ".join(part for part in [normalized_title, normalized_description, *normalized_raw_categories] if part).strip()
 
     scores: dict[str, int] = {}
+    content_signals: dict[str, int] = {}
     for canonical, metadata in NEWS_CATEGORY_TAXONOMY.items():
         if canonical == "varie":
             continue
         score = 0
+        signal_count = 0
+        hint_count = 0
         for raw_category in normalized_raw_categories:
             if any(_contains_term(raw_category, feed_equivalent) for feed_equivalent in metadata.get("feed_equivalents", [])):
                 score += 5
+                signal_count += 1
         for alias in metadata.get("aliases", []):
             if _contains_term(text_blob, alias):
                 score += 2
+                signal_count += 1
         for keyword in metadata.get("keywords", []):
             if _contains_term(text_blob, keyword):
                 score += 2
+                signal_count += 1
         for hint in metadata.get("source_hints", []):
             if _contains_term(normalized_source, hint):
                 score += 1
-        if score > 0:
+                hint_count += 1
+        # Prevent source-only attribution ("wired" alone does not imply technology).
+        if score > 0 and signal_count > 0:
             scores[canonical] = score
+            content_signals[canonical] = signal_count
 
     if not scores:
         return ["varie"]
 
     top_score = max(scores.values())
-    selected = [category for category, score in scores.items() if score >= 2 and score >= top_score - 5]
+    selected = [
+        category
+        for category, score in scores.items()
+        if score >= 2 and score >= top_score - 5 and content_signals.get(category, 0) > 0
+    ]
     selected.sort(key=lambda category: (-scores.get(category, 0), NEWS_CATEGORY_ORDER.get(category, 999)))
     return selected or ["varie"]
 
@@ -701,6 +714,8 @@ def fetch_news_content(sources: list[str], categories: list[str]) -> dict[str, A
                             "link": link,
                             "summary": description[:500],
                             "category": selected_category or "varie",
+                            "raw_categories": raw_categories[:5],
+                            "classified_categories": classified_categories[:5],
                             "source": urllib.parse.urlparse(source).netloc or source,
                             "published_at": published_at,
                         }
