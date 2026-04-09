@@ -207,22 +207,42 @@ NEWS_EXTRA_CATALOG = {
 }
 NEWS_DAYPART_COPY = {
     "mattina": (
-        "🐹 Buon mattino: qui Barcellometro in regia, con la redazione già in corsa sulla ruota delle news. "
+        "Buon mattino: qui Barcellometro in regia, con la redazione già in corsa sulla ruota delle news. "
         "Titoli freschi, zampette veloci e subito al punto. 📰"
     ),
     "pomeriggio": (
-        "🐹 Buon pomeriggio: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
+        "Buon pomeriggio: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
         "Titoli caldi, pochi giri di parole e dritti al punto. 📰"
     ),
     "sera": (
-        "🐹 Buonasera: qui Barcellometro in regia, con la redazione e le notizie che si siedono sotto i riflettori. "
+        "Buonasera: qui Barcellometro in regia, con la redazione e le notizie che si siedono sotto i riflettori. "
         "Facciamo ordine nel caos e vediamo cosa merita davvero attenzione. 📰"
     ),
     "notte": (
-        "🐹 Buona notte: qui Barcellometro ancora sveglio in redazione, con gli ultimi fruscii dal mondo prima di spegnere le luci. "
+        "Buona notte: qui Barcellometro ancora sveglio in redazione, con gli ultimi fruscii dal mondo prima di spegnere le luci. "
         "Due zampate rapide e il quadro è completo. 📰"
     ),
 }
+_NEWS_EMOJI_RE = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]",
+    flags=re.UNICODE,
+)
+_NEWS_DELICATE_KEYWORDS = (
+    "morto",
+    "morti",
+    "ucciso",
+    "uccisa",
+    "vittime",
+    "tragedia",
+    "incidente",
+    "esplos",
+    "sparatoria",
+    "guerra",
+    "attacco",
+    "alluvione",
+    "terremoto",
+    "femminicidio",
+)
 
 
 def sanitize_public_news_text(text: str) -> str:
@@ -286,12 +306,49 @@ def _news_source_line(item: dict[str, Any], *, link: str) -> str:
 def _build_news_item_summary(item: dict[str, Any], *, display: str) -> str:
     ai_summary = sanitize_public_news_text(str(item.get("ai_summary") or ""))
     if not _is_useless_news_text(ai_summary):
-        return _take_news_sentences(ai_summary)
+        return _normalize_news_summary_for_embed(ai_summary, item=item, display=display)
     summary = sanitize_public_news_text(str(item.get("summary") or ""))
     summary = sanitize_plain_text(summary, remove_category_hint=display)
     if _is_useless_news_text(summary):
-        return _first_real_news_sentences(item)
-    return _take_news_sentences(summary)
+        return _normalize_news_summary_for_embed(_first_real_news_sentences(item), item=item, display=display)
+    return _normalize_news_summary_for_embed(summary, item=item, display=display)
+
+
+def _news_summary_contains_emoji(text: str) -> bool:
+    return bool(_NEWS_EMOJI_RE.search(text or ""))
+
+
+def _is_delicate_news_item(item: dict[str, Any], *, display: str) -> bool:
+    blob = " ".join(
+        sanitize_public_news_text(str(item.get(key) or ""))
+        for key in ("title", "summary", "description", "content", "category")
+    )
+    blob = f"{blob} {display}".lower()
+    return any(token in blob for token in _NEWS_DELICATE_KEYWORDS)
+
+
+def _news_summary_prefix(item: dict[str, Any], *, display: str, delicate: bool) -> str:
+    category = sanitize_public_news_text(str(item.get("category") or display)).lower()
+    if delicate:
+        return "Notizia pesante purtroppo 😔:"
+    if "politic" in category:
+        return "Clima teso in aula 👀:"
+    if "tech" in category or "tecnolog" in category:
+        return "Qui i chip friggono bene 🤖:"
+    return "Qui la faccenda si scalda 😵‍💫:"
+
+
+def _normalize_news_summary_for_embed(raw_summary: str, *, item: dict[str, Any], display: str) -> str:
+    cleaned = _take_news_sentences(raw_summary)
+    if not cleaned:
+        cleaned = "Dettagli in aggiornamento."
+    delicate = _is_delicate_news_item(item, display=display)
+    source_hint = sanitize_public_news_text(str(item.get("summary") or ""))
+    if source_hint and SequenceMatcher(None, cleaned.lower(), source_hint.lower()).ratio() >= 0.9:
+        cleaned = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
+    if _news_summary_contains_emoji(cleaned):
+        return _take_news_sentences(cleaned)
+    return _take_news_sentences(f"{_news_summary_prefix(item, display=display, delicate=delicate)} {cleaned}")
 
 
 def _truncate_news_summary(summary: str, *, max_chars: int) -> str:

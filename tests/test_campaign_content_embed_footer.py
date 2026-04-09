@@ -107,7 +107,7 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
     assert "**Che ci racconta il mondo oggi?**" in description
-    assert "🐹" in description
+    assert "📰" in description
     assert "📰" in description
     assert any(greeting in description for greeting in ["Buon mattino", "Buon pomeriggio", "Buonasera", "Buona notte"])
     assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
@@ -239,6 +239,7 @@ def test_news_minimal_fallback_used_only_when_all_text_is_empty() -> None:
     news = build_news_embeds({}, payload)
     field_value = news[0].fields[0].value or ""
     assert "Dettagli in aggiornamento." in field_value
+    assert any(emoji in field_value for emoji in ("👀", "😵‍💫", "😔"))
 
 
 def test_news_fallback_embed_uses_campaigns_author_service_label() -> None:

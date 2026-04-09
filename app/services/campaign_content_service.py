@@ -50,6 +50,26 @@ _NEWS_INPUT_SOURCE_TRAIL_RE = re.compile(r"(?i)\bfonte\s*:[^\n]*")
 _NEWS_AI_META_RE = re.compile(
     r"(?i)\b(?:ecco|versione in italiano|riassunto|questa notizia|in questa notizia|contenuto fornito)\b"
 )
+_NEWS_EMOJI_RE = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]",
+    flags=re.UNICODE,
+)
+_NEWS_DELICATE_KEYWORDS = (
+    "morto",
+    "morti",
+    "ucciso",
+    "uccisa",
+    "vittime",
+    "tragedia",
+    "incidente",
+    "esplos",
+    "sparatoria",
+    "guerra",
+    "attacco",
+    "alluvione",
+    "terremoto",
+    "femminicidio",
+)
 _COMMON_ENGLISH_NEWS_WORDS = {"the", "and", "with", "breaking", "update", "today", "after", "from", "that", "this"}
 _NEWS_EXTRA_ITALIAN_FALLBACKS = {
     "barzelletta": "Il criceto in redazione: «Promesso, oggi apro solo tre tab». Erano trenta.",
@@ -345,6 +365,19 @@ class CampaignContentService:
         return " ".join(sentences[:2])[:280]
 
     @staticmethod
+    def _news_summary_contains_emoji(text: str) -> bool:
+        return bool(_NEWS_EMOJI_RE.search(text or ""))
+
+    @staticmethod
+    def _is_delicate_news_text(*parts: str) -> bool:
+        blob = " ".join(part for part in parts if part).lower()
+        return any(token in blob for token in _NEWS_DELICATE_KEYWORDS)
+
+    @staticmethod
+    def _news_fallback_prefix(*, delicate: bool) -> str:
+        return "Notizia pesante purtroppo 😔:" if delicate else "Qui la faccenda si scalda 👀:"
+
+    @staticmethod
     def _sanitize_news_input_text(text: str) -> str:
         cleaned = unescape(CampaignContentService._sanitize_editorial_text(text))
         cleaned = re.sub(r"<[^>]+>", " ", cleaned)
@@ -391,10 +424,11 @@ class CampaignContentService:
             fields.append(f"Pubblicata: {published_at}")
         return (
             "Ricevi solo titolo e breve contenuto di una notizia. "
-            "Scrivi un mini-riassunto in italiano di massimo 2 frasi. "
+            "Scrivi in italiano un mini-riassunto di massimo 2 frasi brevi. "
             "Usa solo le informazioni fornite. Non aggiungere contesto esterno, non inventare dettagli, "
             "non fare introduzioni meta, non citare la fonte nel testo, non copiare quasi letteralmente il testo sorgente. "
-            "Tono leggero e leggibile, ma sobrio e rispettoso per notizie delicate.\n"
+            "Inserisci una piccola emoji naturale nel testo (non nel titolo); per notizie delicate usa tono rispettoso con emoji sobria. "
+            "Niente commenti sul prompt o sul tuo ruolo.\n"
             + "\n".join(fields)
         )
 
@@ -411,6 +445,8 @@ class CampaignContentService:
         sentence_count = len([s for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()])
         if sentence_count > 2:
             return False, "too_many_sentences", cleaned
+        if not self._news_summary_contains_emoji(cleaned):
+            return False, "missing_emoji", cleaned
         source_blob = " ".join(part for part in [source_title, source_summary] if part).strip().lower()
         if source_blob:
             if SequenceMatcher(None, cleaned.lower(), source_blob).ratio() >= 0.9:
@@ -427,12 +463,16 @@ class CampaignContentService:
         base = self._sanitize_news_summary_fallback(cleaned_summary)
         if base and title and SequenceMatcher(None, base.lower(), title.lower()).ratio() > 0.9:
             base = ""
+        delicate = self._is_delicate_news_text(title, cleaned_summary)
         if base:
-            return base
+            prefixed = f"{self._news_fallback_prefix(delicate=delicate)} {base}".strip()
+            return self._sanitize_news_summary_fallback(prefixed)
         title_clean = self._sanitize_news_input_text(title)
         if not title_clean:
-            return "Dettagli in aggiornamento."
-        return f"La notizia segnala: {title_clean}."
+            return "Aggiornamento in corso 👀."
+        return self._sanitize_news_summary_fallback(
+            f"{self._news_fallback_prefix(delicate=delicate)} {title_clean}."
+        )
 
     async def _normalize_news_extras_payload(self, payload: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}
