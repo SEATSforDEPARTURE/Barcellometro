@@ -59,25 +59,11 @@ _NEWS_EMOJI_RE = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]",
     flags=re.UNICODE,
 )
-_NEWS_DELICATE_KEYWORDS = (
-    "morto",
-    "morti",
-    "ucciso",
-    "uccisa",
-    "vittime",
-    "tragedia",
-    "incidente",
-    "esplos",
-    "sparatoria",
-    "guerra",
-    "attacco",
-    "alluvione",
-    "terremoto",
-    "femminicidio",
-)
 _NEWS_BOT_OPENING_RE = re.compile(
     r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|clima teso|notizia pesante)\b"
 )
+_NEWS_MAX_BODY_SENTENCES = 2
+_NEWS_MAX_BODY_CHARS = 280
 _COMMON_ENGLISH_NEWS_WORDS = {"the", "and", "with", "breaking", "update", "today", "after", "from", "that", "this"}
 _NEWS_EXTRA_ITALIAN_FALLBACKS = {
     "barzelletta": "Il criceto in redazione: «Promesso, oggi apro solo tre tab». Erano trenta.",
@@ -370,6 +356,7 @@ class CampaignContentService:
         fallback = self._build_news_summary_fallback(title=title, cleaned_summary=content)
         logger.debug("news_ai_summary_start title=%s category=%s source=%s", title[:80], category or "varie", source or "n/a")
         if self._ai is None or not self._ai.is_enabled():
+            logger.info("news_summary_body_generated title=%s chars=%s", title[:80], len(fallback))
             return fallback, False
         prompt = self._build_news_summary_prompt(
             title=title,
@@ -390,10 +377,12 @@ class CampaignContentService:
             source_summary=content,
         )
         if not accepted:
-            logger.info("news_ai_summary_rejected reason=%s title=%s", reason, title[:80])
+            logger.info("news_summary_body_rejected reason=%s title=%s", reason, title[:80])
             logger.info("news_ai_summary_fallback_used title=%s", title[:80])
+            logger.info("news_summary_body_generated title=%s chars=%s", title[:80], len(fallback))
             return fallback, False
         logger.info("news_ai_summary_accepted title=%s chars=%s", title[:80], len(cleaned))
+        logger.info("news_summary_body_generated title=%s chars=%s", title[:80], len(cleaned))
         cache[seed] = cleaned
         return cleaned, True
 
@@ -407,20 +396,11 @@ class CampaignContentService:
         sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
         if not sentences:
             return cleaned[:220]
-        return " ".join(sentences[:2])[:280]
+        return " ".join(sentences[:_NEWS_MAX_BODY_SENTENCES])[:_NEWS_MAX_BODY_CHARS]
 
     @staticmethod
     def _news_summary_contains_emoji(text: str) -> bool:
         return bool(_NEWS_EMOJI_RE.search(text or ""))
-
-    @staticmethod
-    def _is_delicate_news_text(*parts: str) -> bool:
-        blob = " ".join(part for part in parts if part).lower()
-        return any(token in blob for token in _NEWS_DELICATE_KEYWORDS)
-
-    @staticmethod
-    def _news_fallback_prefix(*, delicate: bool) -> str:
-        return "Situazione pesante, purtroppo 🫥" if delicate else "Quadro in evoluzione 👀"
 
     @staticmethod
     def _sanitize_news_input_text(text: str) -> str:
@@ -470,12 +450,11 @@ class CampaignContentService:
         return (
             "Ricevi solo titolo e breve contenuto di una notizia. "
             "Scrivi in italiano un mini-riassunto in massimo 2 frasi. "
-            "Inizia subito dal contenuto della notizia: non iniziare con emoji, faccine o commenti del bot. "
-            "Non iniziare con formule tipo 'qui la faccenda', 'in pratica', 'attenzione' o simili. "
+            "Inizia subito dal contenuto della notizia. "
             "Usa esclusivamente le informazioni fornite: non aggiungere fatti esterni e non inventare dettagli. "
             "Niente introduzioni meta, niente riferimenti al prompt o al tuo ruolo, niente fonte nel testo. "
-            "Se vuoi inserire un tocco leggero/cricetoso o una piccola emoji, mettili solo nel mezzo o alla fine. "
-            "Per notizie delicate usa tono sobrio e rispettoso.\n"
+            "Non aggiungere emoji. Non aggiungere commenti finali del bot. "
+            "Non fare introduzioni meta.\n"
             + "\n".join(fields)
         )
 
@@ -489,12 +468,12 @@ class CampaignContentService:
             return False, "meta_output", cleaned
         if re.search(r"<[^>]+>|```", cleaned):
             return False, "dirty_markup", cleaned
-        if self._starts_with_emoji(cleaned):
-            return False, "starts_with_emoji", cleaned
+        if self._news_summary_contains_emoji(cleaned):
+            return False, "emoji_not_allowed", cleaned
         if self._starts_with_bot_comment(cleaned):
-            return False, "starts_with_bot_comment", cleaned
+            return False, "bot_comment_not_allowed", cleaned
         sentence_count = len([s for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()])
-        if sentence_count > 2:
+        if sentence_count > _NEWS_MAX_BODY_SENTENCES:
             return False, "too_many_sentences", cleaned
         source_blob = " ".join(part for part in [source_title, source_summary] if part).strip().lower()
         if source_blob:
@@ -519,26 +498,34 @@ class CampaignContentService:
     def _starts_with_bot_comment(text: str) -> bool:
         return bool(_NEWS_BOT_OPENING_RE.search(sanitize_public_news_text(text).lower().lstrip(" -:;,.!")))
 
+    def _build_news_summary_body(self, text: str) -> str:
+        sanitized = sanitize_public_news_text(self._sanitize_news_summary_fallback(text))
+        if not sanitized:
+            return ""
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", sanitized) if part.strip()]
+        body = " ".join(sentences[:_NEWS_MAX_BODY_SENTENCES]).strip()
+        if len(body) > _NEWS_MAX_BODY_CHARS:
+            body = body[:_NEWS_MAX_BODY_CHARS].rsplit(" ", 1)[0].strip()
+        if body and not re.search(r"[.!?]\s*$", body):
+            body = f"{body}."
+        return body
+
     def _build_news_summary_fallback(self, *, title: str, cleaned_summary: str) -> str:
         base = sanitize_public_news_text(self._sanitize_news_summary_fallback(cleaned_summary))
         if base and title and SequenceMatcher(None, base.lower(), title.lower()).ratio() > 0.9:
             base = ""
-        delicate = self._is_delicate_news_text(title, cleaned_summary)
         if base:
             if self._starts_with_emoji(base):
                 base = re.sub(r"^\s*\S+\s*", "", base).strip()
             if self._starts_with_bot_comment(base):
                 base = re.sub(r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|clima teso|notizia pesante)\b[^:.\-]*[:.\-]?\s*", "", base).strip()
-            if not base:
-                base = self._sanitize_news_input_text(title)
-            first_sentence = re.split(r"(?<=[.!?])\s+", base, maxsplit=1)[0].strip()
-            if not re.search(r"[.!?]\s*$", first_sentence):
-                first_sentence = f"{first_sentence}."
-            return self._sanitize_news_summary_fallback(f"{first_sentence} {self._news_fallback_prefix(delicate=delicate)}")
+            body = self._build_news_summary_body(base)
+            if body:
+                return body
         title_clean = self._sanitize_news_input_text(title)
         if not title_clean:
-            return self._sanitize_news_summary_fallback(f"Aggiornamento in corso. {self._news_fallback_prefix(delicate=delicate)}")
-        return self._sanitize_news_summary_fallback(f"{title_clean}. {self._news_fallback_prefix(delicate=delicate)}")
+            return "Aggiornamento in corso."
+        return self._build_news_summary_body(f"{title_clean}. Dettagli in aggiornamento.") or "Dettagli in aggiornamento."
 
     async def _normalize_news_extras_payload(self, payload: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}
