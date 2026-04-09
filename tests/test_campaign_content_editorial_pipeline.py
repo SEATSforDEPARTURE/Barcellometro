@@ -23,6 +23,7 @@ from app.services.campaign_content_formatter import (
     build_horoscope_embeds,
     build_news_embeds,
     build_news_page_map,
+    news_edition_label_for_datetime,
     build_weather_embeds,
 )
 from app.services.campaign_content_service import CampaignContentService
@@ -61,9 +62,11 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     embeds = build_news_embeds({"embed_title": "📰 NOTIZIARIO"}, payload)
     assert len(embeds) == 1
     field_names = [field.name for field in embeds[0].fields]
-    assert "📰 __**CRONACA**__" in field_names
-    assert "💻 __**TECNOLOGIA**__" in field_names
-    assert "⚽ __**SPORT**__" not in field_names
+    assert field_names[0] == "⚡ __**ULTIM'ORA**__"
+    assert field_names[1] == "🌟 __**IN EVIDENZA**__"
+    assert "__**CRONACA IN PRIMO PIANO**__" in field_names
+    assert "__**TECNOLOGIA IN PRIMO PIANO**__" in field_names
+    assert "__**SPORT IN PRIMO PIANO**__" not in field_names
 
 
 def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
@@ -85,6 +88,37 @@ def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
     assert "Prima frase pulita." in field_value
     assert "Seconda frase utile." in field_value
     assert "Terza frase da ignorare." not in field_value
+
+
+def test_news_edition_label_switches_by_timeslot() -> None:
+    morning = news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T05:30:00+02:00"))[0]
+    afternoon = news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T12:30:00+02:00"))[0]
+    evening = news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T18:30:00+02:00"))[0]
+    night = news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T23:30:00+02:00"))[0]
+    assert morning == "EDIZIONE MATTUTINA"
+    assert afternoon == "EDIZIONE POMERIDIANA"
+    assert evening == "EDIZIONE SERALE"
+    assert night == "EDIZIONE NOTTURNA"
+
+
+def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
+    payload = {
+        "configured_categories": ["economia", "sport", "cronaca", "politica", "tecnologia"],
+        "categories": {
+            "cronaca": [{"title": "Cronaca A", "summary": "S", "source": "ansa.it", "link": "https://example.com/1"}],
+            "sport": [{"title": "Sport A", "summary": "S", "source": "ansa.it", "link": "https://example.com/2"}],
+            "economia": [{"title": "Economia A", "summary": "S", "source": "ansa.it", "link": "https://example.com/3"}],
+            "politica": [{"title": "Politica A", "summary": "S", "source": "ansa.it", "link": "https://example.com/4"}],
+            "tecnologia": [{"title": "Tech A", "summary": "S", "source": "ansa.it", "link": "https://example.com/5"}],
+        },
+    }
+    fields = [field.name for field in build_news_embeds({}, payload)[0].fields]
+    editorial = [name for name in fields if "IN PRIMO PIANO" in name]
+    assert editorial == [
+        "__**ECONOMIA IN PRIMO PIANO**__",
+        "__**SPORT IN PRIMO PIANO**__",
+        "__**CRONACA IN PRIMO PIANO**__",
+    ]
 
 
 def test_build_horoscope_embeds_strip_inner_headings() -> None:
@@ -422,6 +456,7 @@ def test_campaign_content_one_shot_disables_after_send() -> None:
             embed_color="#112233",
             sources_json="[]",
             categories_json=None,
+            extras_json=None,
             next_run_at=datetime.now(timezone.utc).isoformat(),
         )
         config = await db.get_campaign_content_config(guild_id, cfg_id)

@@ -41,6 +41,13 @@ NEWS_SOURCE_CHOICES = [str(entry["value"]).strip().lower() for entry in NEWS_SOU
 NEWS_SOURCE_LABELS = {str(entry["value"]).strip().lower(): str(entry["label"]).strip() for entry in NEWS_SOURCE_CATALOG}
 NEWS_CATEGORY_CHOICES = [str(entry["value"]).strip().lower() for entry in NEWS_CATEGORY_CATALOG]
 NEWS_CATEGORY_LABELS = {str(entry["value"]).strip().lower(): str(entry["label"]).strip() for entry in NEWS_CATEGORY_CATALOG}
+NEWS_EXTRA_CHOICES = ["barzelletta", "aforisma", "canzone", "meme"]
+NEWS_EXTRA_LABELS = {
+    "barzelletta": "barzelletta",
+    "aforisma": "aforisma",
+    "canzone": "canzone",
+    "meme": "meme",
+}
 
 
 def _fold_token(value: str) -> str:
@@ -251,6 +258,7 @@ def _format_service_config_row(row: dict[str, object]) -> str:
             f"embed_color {row.get('embed_color') or '-'}",
             f"sources {row.get('sources_json') or '[]'}",
             f"categories {row.get('categories_json') or '-'}",
+            f"extras {row.get('extras_json') or '-'}",
         ]
     )
 
@@ -367,6 +375,13 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             preferred_labels=NEWS_CATEGORY_LABELS,
             aliases=NEWS_CATEGORY_ALIASES,
             normalizer=_fold_token,
+        )
+
+    async def _news_extras_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=NEWS_EXTRA_CHOICES,
+            preferred_labels=NEWS_EXTRA_LABELS,
         )
 
     async def _get_service_schedule(guild_id: str, service_type: str, schedule_id: int) -> dict[str, object] | None:
@@ -533,6 +548,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_color: str | None,
         sources: str | None,
         categories: str | None,
+        extras: str | None = None,
     ) -> None:
         if not await _check(interaction, f"campaigns.{service_type.lower()}.schedule_add", f"campagne.{service_type.lower()}.schedule_add"):
             return
@@ -567,6 +583,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_color=embed_color,
             sources_json=sources_json,
             categories_json=",".join(_normalize_csv_values(categories)) if categories is not None else None,
+            extras_json=json.dumps(_normalize_csv_values(extras), ensure_ascii=False) if extras is not None else None,
             next_run_at=next_run.isoformat(),
         )
         await _send(interaction, subcommand_path=subcommand_path, subtitle_args=[config_id], lines=[("schedule_id", config_id), ("next_run", next_run.isoformat()), ("result", "created")], kind="success")
@@ -583,6 +600,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         enabled: bool | None,
         sources: str | None = None,
         categories: str | None = None,
+        extras: str | None = None,
     ) -> None:
         if not await _check(interaction, f"campaigns.{service_type.lower()}.schedule_edit", f"campagne.{service_type.lower()}.schedule_edit"):
             return
@@ -629,6 +647,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_color=embed_color,
             sources_json=json.dumps(_normalize_csv_values(sources), ensure_ascii=False) if sources is not None else None,
             categories_json=",".join(_normalize_csv_values(categories)) if categories is not None else None,
+            extras_json=json.dumps(_normalize_csv_values(extras), ensure_ascii=False) if extras is not None else None,
             next_run_at=next_run_at,
             set_time_local=time_local is not None,
             set_interval_minutes=interval_minutes is not None,
@@ -636,6 +655,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             set_embed_color=embed_color is not None,
             set_sources_json=sources is not None,
             set_categories_json=categories is not None,
+            set_extras_json=extras is not None,
             set_next_run_at=next_run_at is not None,
         )
         if enabled is not None:
@@ -1085,8 +1105,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_color="Optional embed color",
         sources="Guided multi-value sources (comma-separated)",
         categories="Guided multi-value categories (comma-separated)",
+        extras="Guided multi-value extras (comma-separated)",
     )
-    @app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete)
+    @app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete, extras=_news_extras_autocomplete)
     async def news_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
@@ -1095,6 +1116,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_color: str | None = None,
         sources: str | None = None,
         categories: str | None = None,
+        extras: str | None = None,
     ) -> None:
         normalized_sources, invalid_sources = _parse_guided_csv_values(
             sources,
@@ -1123,6 +1145,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
                 kind="error",
             )
             return
+        normalized_extras, invalid_extras = _parse_guided_csv_values(
+            extras,
+            allowed=NEWS_EXTRA_CHOICES,
+        )
+        if invalid_extras:
+            await _send(
+                interaction,
+                subcommand_path="campaigns news schedule_add",
+                lines=[("error", f"Unsupported extras: {', '.join(invalid_extras)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_add(
             interaction,
             service_type="NEWS",
@@ -1132,6 +1166,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_color=embed_color,
             sources=",".join(normalized_sources) if sources is not None else None,
             categories=",".join(normalized_categories) if categories is not None else None,
+            extras=",".join(normalized_extras) if extras is not None else None,
         )
 
     @news_group.command(name="schedule_edit", description="Edit a news campaign schedule")
@@ -1142,7 +1177,11 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title="Optional embed title",
         embed_color="Optional embed color",
         enabled="Enable or disable this schedule",
+        sources="Guided multi-value sources (comma-separated)",
+        categories="Guided multi-value categories (comma-separated)",
+        extras="Guided multi-value extras (comma-separated)",
     )
+    @app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete, extras=_news_extras_autocomplete)
     async def news_schedule_edit(
         interaction: discord.Interaction,
         id: int,
@@ -1151,7 +1190,46 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title: str | None = None,
         embed_color: str | None = None,
         enabled: bool | None = None,
+        sources: str | None = None,
+        categories: str | None = None,
+        extras: str | None = None,
     ) -> None:
+        normalized_sources, invalid_sources = _parse_guided_csv_values(
+            sources,
+            allowed=NEWS_SOURCE_CHOICES,
+            aliases=NEWS_SOURCE_ALIASES,
+        )
+        if invalid_sources:
+            await _send(
+                interaction,
+                subcommand_path="campaigns news schedule_edit",
+                lines=[("error", f"Unsupported sources: {', '.join(invalid_sources)}.")],
+                kind="error",
+            )
+            return
+        normalized_categories, invalid_categories = _parse_guided_csv_values(
+            categories,
+            allowed=NEWS_CATEGORY_CHOICES,
+            aliases=NEWS_CATEGORY_ALIASES,
+            normalizer=_fold_token,
+        )
+        if invalid_categories:
+            await _send(
+                interaction,
+                subcommand_path="campaigns news schedule_edit",
+                lines=[("error", f"Unsupported categories: {', '.join(invalid_categories)}.")],
+                kind="error",
+            )
+            return
+        normalized_extras, invalid_extras = _parse_guided_csv_values(extras, allowed=NEWS_EXTRA_CHOICES)
+        if invalid_extras:
+            await _send(
+                interaction,
+                subcommand_path="campaigns news schedule_edit",
+                lines=[("error", f"Unsupported extras: {', '.join(invalid_extras)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_edit(
             interaction,
             service_type="NEWS",
@@ -1161,6 +1239,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_title=embed_title,
             embed_color=embed_color,
             enabled=enabled,
+            sources=",".join(normalized_sources) if sources is not None else None,
+            categories=",".join(normalized_categories) if categories is not None else None,
+            extras=",".join(normalized_extras) if extras is not None else None,
         )
 
     @news_group.command(name="schedule_show", description="Show a news campaign schedule")

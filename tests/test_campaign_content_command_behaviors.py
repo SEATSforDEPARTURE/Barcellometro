@@ -329,6 +329,26 @@ def test_news_schedule_add_accepts_display_labels_and_persists_canonical_values(
     asyncio.run(_run())
 
 
+def test_news_schedule_add_persists_extras_json(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+
+        messaggi_module.register_messaggi(group, ctx)
+        news_group = _get_subgroup(group, "news")
+        callback = _get_command_callback(news_group, "schedule_add")
+        interaction = _FakeInteraction()
+        await callback(interaction, extras="barzelletta, meme, barzelletta")
+
+        assert db.created_service_payload is not None
+        assert db.created_service_payload["extras_json"] == '["barzelletta", "meme"]'
+
+    asyncio.run(_run())
+
+
 def test_news_schedule_add_rejects_unsupported_sources(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
@@ -468,7 +488,7 @@ def test_parse_guided_values_rejects_unsupported_tokens(messaggi_module) -> None
 
 def test_news_schedule_add_command_exposes_autocomplete() -> None:
     source = Path("app/plugins/commands_modular/messaggi.py").read_text(encoding="utf-8")
-    assert "@app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete)" in source
+    assert "@app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete, extras=_news_extras_autocomplete)" in source
 
 
 def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module) -> None:

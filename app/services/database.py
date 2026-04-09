@@ -477,6 +477,7 @@ class DatabaseService:
                 embed_color TEXT NULL,
                 sources_json TEXT NOT NULL DEFAULT '[]',
                 categories_json TEXT NULL,
+                extras_json TEXT NULL,
                 last_sent_at TEXT NULL,
                 next_run_at TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -992,6 +993,7 @@ class DatabaseService:
         await self._ensure_trigger_phrase_columns()
         await self._ensure_channel_summary_schedule_columns()
         await self._ensure_server_summary_schedule_columns()
+        await self._ensure_campaign_content_columns()
         await self._ensure_trigger_barcello_state_columns()
         await self._ensure_daily_report_pagination_state_columns()
         await self._ensure_inactivity_config_columns()
@@ -1425,6 +1427,15 @@ class DatabaseService:
                 "UPDATE server_summary_schedule SET created_at = COALESCE(created_at, ?), updated_at = COALESCE(updated_at, ?) WHERE created_at IS NULL OR updated_at IS NULL",
                 (now, now),
             )
+
+    async def _ensure_campaign_content_columns(self) -> None:
+        assert self._conn is not None
+        columns = await self.fetchall("PRAGMA table_info(campaign_content_configs)")
+        if not columns:
+            return
+        existing = {row["name"] for row in columns}
+        if "extras_json" not in existing:
+            await self._conn.execute("ALTER TABLE campaign_content_configs ADD COLUMN extras_json TEXT NULL")
 
     def _serialize_allowed_role_ids(self, allowed_role_ids: list[str] | list[int] | None) -> str | None:
         if not allowed_role_ids:
@@ -5129,6 +5140,7 @@ class DatabaseService:
         embed_color: Optional[str],
         sources_json: str,
         categories_json: Optional[str],
+        extras_json: Optional[str],
         next_run_at: str,
     ) -> int:
         assert self._conn is not None
@@ -5137,9 +5149,9 @@ class DatabaseService:
             """
             INSERT INTO campaign_content_configs (
                 guild_id, channel_id, service_type, enabled, time_local, interval_minutes,
-                embed_title, embed_color, sources_json, categories_json,
+                embed_title, embed_color, sources_json, categories_json, extras_json,
                 last_sent_at, next_run_at, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)
             """,
             (
                 guild_id,
@@ -5152,6 +5164,7 @@ class DatabaseService:
                 embed_color,
                 sources_json,
                 categories_json,
+                extras_json,
                 next_run_at,
                 now,
                 now,
@@ -5224,6 +5237,7 @@ class DatabaseService:
         embed_color: Optional[str] = None,
         sources_json: Optional[str] = None,
         categories_json: Optional[str] = None,
+        extras_json: Optional[str] = None,
         next_run_at: Optional[str] = None,
         set_channel_id: bool = False,
         set_time_local: bool = False,
@@ -5232,6 +5246,7 @@ class DatabaseService:
         set_embed_color: bool = False,
         set_sources_json: bool = False,
         set_categories_json: bool = False,
+        set_extras_json: bool = False,
         set_next_run_at: bool = False,
     ) -> bool:
         updates: list[str] = []
@@ -5249,6 +5264,7 @@ class DatabaseService:
         _push("embed_color", embed_color, set_embed_color)
         _push("sources_json", sources_json, set_sources_json)
         _push("categories_json", categories_json, set_categories_json)
+        _push("extras_json", extras_json, set_extras_json)
         _push("next_run_at", next_run_at, set_next_run_at)
 
         if not updates:

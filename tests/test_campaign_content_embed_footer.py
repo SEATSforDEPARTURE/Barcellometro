@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import re
 import sys
 import types
@@ -14,6 +15,7 @@ from app.services.campaign_content_formatter import (
     build_horoscope_embeds,
     build_news_embeds,
     build_news_page_map,
+    news_edition_label_for_datetime,
     build_weather_embeds,
     sanitize_public_news_text,
 )
@@ -74,7 +76,7 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"signs": {"Ariete": {"text": "Focus"}}},
     )
-    assert _title_inner_without_emoji(news[0].title or "") == "HAMSTER NEWS • PANORAMICA"
+    assert "HAMSTER NEWS • EDIZIONE" in _title_inner_without_emoji(news[0].title or "")
     assert len(news) == 1
     assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO DEL GIORNO • INIZIO"
     assert _title_inner_without_emoji(horoscope[1].title or "") == "OROSCOPO DEL GIORNO • ARIETE"
@@ -105,7 +107,7 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
     assert "**Che ci dice il mondo quest'oggi?**" in description
-    assert any(daypart in description.lower() for daypart in ["mattina", "pomeriggio", "sera"])
+    assert any(daypart in description.lower() for daypart in ["mattina", "pomeriggio", "sera", "notte"])
     assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
 
 
@@ -153,7 +155,7 @@ def test_news_public_sanitization_strips_meta_prefixes_and_keeps_content() -> No
     assert cleaned == "**Focus** utile."
 
 
-def test_news_category_item_format_matches_overview_and_limit_five_items() -> None:
+def test_news_category_item_format_matches_single_item_field_format() -> None:
     payload = {
         "categories": {
             "cronaca": [
@@ -164,12 +166,13 @@ def test_news_category_item_format_matches_overview_and_limit_five_items() -> No
     }
     news = build_news_embeds({}, payload)
     overview = news[0]
-    assert len(overview.fields) == 1
-    first_field_value = overview.fields[0].value or ""
+    assert len(overview.fields) >= 3
+    first_field_value = overview.fields[2].value or ""
     assert "**[Titolo 1](https://example.com/1)**" in first_field_value
-    assert "**[Titolo 2](https://example.com/2)**" in first_field_value
-    assert "**[Titolo 3](https://example.com/3)**" not in first_field_value
-    assert overview.fields[0].name == "📰 __**CRONACA**__"
+    assert "**[Titolo 2](https://example.com/2)**" not in first_field_value
+    assert overview.fields[0].name == "⚡ __**ULTIM'ORA**__"
+    assert overview.fields[1].name == "🌟 __**IN EVIDENZA**__"
+    assert overview.fields[2].name == "__**CRONACA IN PRIMO PIANO**__"
 
     for idx, field in enumerate(overview.fields):
         value = field.value or ""
@@ -177,7 +180,30 @@ def test_news_category_item_format_matches_overview_and_limit_five_items() -> No
         assert value.count("\n• ") >= 1
         assert value.count("`fonte: www.ansa.it`") >= 1
         item_count = value.count("`fonte:")
-        assert item_count <= 2, f"Field {idx} exceeds max 2 items: {item_count}"
+        assert item_count <= 1, f"Field {idx} exceeds max 1 item: {item_count}"
+
+
+def test_news_edition_label_coverage() -> None:
+    assert news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T05:00:00+02:00"))[0] == "EDIZIONE MATTUTINA"
+    assert news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T12:00:00+02:00"))[0] == "EDIZIONE POMERIDIANA"
+    assert news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T18:00:00+02:00"))[0] == "EDIZIONE SERALE"
+    assert news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T23:00:00+02:00"))[0] == "EDIZIONE NOTTURNA"
+
+
+def test_news_embed_supports_extras_and_next_edition_for_recurring() -> None:
+    news = build_news_embeds(
+        {"interval_minutes": 30, "extras_json": '["barzelletta","aforisma","canzone","meme"]'},
+        {
+            "generated_at": "2026-04-09T08:00:00+00:00",
+            "categories": {"cronaca": [{"title": "Titolo 1", "summary": "S1", "source": "ansa.it", "link": "https://example.com/1"}]},
+        },
+    )
+    field_names = [field.name for field in news[0].fields]
+    assert "😂 __**BARZELLETTA DEL GIORNO**__" in field_names
+    assert "🧠 __**AFORISMA DEL GIORNO**__" in field_names
+    assert "🎵 __**CANZONE DEL GIORNO**__" in field_names
+    assert "🖼️ __**MEME DEL GIORNO**__" in field_names
+    assert "🔜 __**PROSSIMA EDIZIONE**__" in field_names
 
 
 def test_news_fallback_uses_real_source_sentences_before_minimal_placeholder() -> None:

@@ -126,6 +126,20 @@ Regole operative:
 - il fallback author per servizio è `emoji servizio + nome servizio`;
 - gli status `/embed ... status` usano vista multipagina quando l'elenco servizi è lungo.
 
+### Campaigns news (edizione giornalistica)
+- il renderer news ora pubblica una **edizione** dinamica in base alla fascia oraria italiana:
+  - `EDIZIONE MATTUTINA` (05:00–11:59),
+  - `EDIZIONE POMERIDIANA` (12:00–17:59),
+  - `EDIZIONE SERALE` (18:00–22:59),
+  - `EDIZIONE NOTTURNA` (23:00–04:59).
+- struttura field news:
+  1. `⚡ ULTIM'ORA` (1 notizia),
+  2. `🌟 IN EVIDENZA` (1 notizia),
+  3. fino a 3 categorie configurate nello schedule come `X IN PRIMO PIANO` (1 notizia per field, ordine configurato),
+  4. extra opzionali (`BARZELLETTA`, `AFORISMA`, `CANZONE`, `MEME` del giorno),
+  5. `🔜 PROSSIMA EDIZIONE` solo per schedule ricorrenti.
+- i comandi `/campaigns news schedule_add` e `/campaigns news schedule_edit` supportano `extras` guidati (CSV con autocomplete): `barzelletta, aforisma, canzone, meme`.
+
 ### AI centrale
 - `/barcello [user1] [user2] [minuti]` → report user-facing del barcello inviato in DM con conferma standardizzata nel canale.
 - `/admin ai on` → abilita il servizio AI.

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import discord
 from app.services.author import attach_author_meta_to_all
@@ -188,11 +189,38 @@ _NEWS_BAD_FALLBACKS = {
     "nessun riassunto disponibile.",
 }
 _NEWS_MAX_SENTENCES = 2
-_NEWS_MAX_ITEMS_PER_FIELD = 2
-_NEWS_FIELD_SOFT_LIMIT = 900
 _NEWS_FIELD_HARD_LIMIT = 1024
-_NEWS_MAX_CATEGORIES = 5
-_NEWS_MAX_TOTAL_ITEMS = 10
+_NEWS_MAX_EDITORIAL_CATEGORIES = 3
+_ITALY_TZ = ZoneInfo("Europe/Rome")
+NEWS_EXTRA_ORDER = ["barzelletta", "aforisma", "canzone", "meme"]
+NEWS_EXTRA_FIELD_TITLES = {
+    "barzelletta": ("😂 BARZELLETTA DEL GIORNO", "😂"),
+    "aforisma": ("🧠 AFORISMA DEL GIORNO", "🧠"),
+    "canzone": ("🎵 CANZONE DEL GIORNO", "🎵"),
+    "meme": ("🖼️ MEME DEL GIORNO", "🖼️"),
+}
+NEWS_EXTRA_CATALOG = {
+    "barzelletta": [
+        "Perché il criceto non litiga mai col meteo? Perché tiene sempre il sangue freddo.",
+        "Il giornalista chiede al criceto: «Hai fonti?» — «Sì, ma non le rosicchio.»",
+        "«Ultim’ora?» «No, ultima ruota: quella della mia corsa in redazione.»",
+    ],
+    "aforisma": [
+        "La chiarezza è la forma più elegante della verità.",
+        "Le notizie passano, il criterio resta.",
+        "Chi ascolta bene capisce prima del rumore.",
+    ],
+    "canzone": [
+        "Viva La Vida — Coldplay\nUna spinta epica per la prossima corsa in redazione.",
+        "La Cura — Franco Battiato\nParole misurate e atmosfera da chiusura stampa.",
+        "Heroes — David Bowie\nEnergia da prima pagina e sguardo lungo.",
+    ],
+    "meme": [
+        "Quando dici «solo un titolo» e apri 14 tab in 30 secondi.",
+        "Io: «Controllo una notizia al volo». Anche io, due ore dopo: «Edizione straordinaria».",
+        "Il criceto in regia quando arriva il breaking: modalità turbo attivata.",
+    ],
+}
 
 
 def sanitize_public_news_text(text: str) -> str:
@@ -290,87 +318,24 @@ def _format_news_item_block(
     return f"{heading}\n• {summary}\n`fonte: {source_line}`"
 
 
-def _build_news_category_field_value(items: list[dict[str, Any]], *, display: str) -> str:
-    limited_items = items[:_NEWS_MAX_ITEMS_PER_FIELD]
-    if not limited_items:
-        return ""
-    summary_limits = [320, 220, 170, 130, 100]
-    for summary_limit in summary_limits:
-        blocks = [
-            _format_news_item_block(
-                item,
-                display=display,
-                numbered=False,
-                index=0,
-                max_summary_chars=summary_limit,
-            )
-            for item in limited_items
-        ]
-        candidate = "\n\n".join(blocks)
-        if len(candidate) <= _NEWS_FIELD_HARD_LIMIT:
-            return candidate
-    fallback = _format_news_item_block(
-        limited_items[0],
-        display=display,
-        numbered=False,
-        index=0,
-        max_summary_chars=220,
-    )
-    return fallback[:_NEWS_FIELD_HARD_LIMIT]
-
-
-def chunk_news_items_for_embed(items: list[dict[str, Any]], *, display: str) -> list[str]:
-    blocks = [_format_news_item_block(item, display=display, numbered=True, index=idx) for idx, item in enumerate(items[:5], start=1)]
-    if not blocks:
-        return []
-    chunks: list[str] = []
-    current: list[str] = []
-    for block in blocks:
-        candidate = "\n\n".join([*current, block]) if current else block
-        force_new_chunk = bool(current) and (
-            len(current) >= _NEWS_MAX_ITEMS_PER_FIELD
-            or len(candidate) > _NEWS_FIELD_SOFT_LIMIT
-        )
-        if force_new_chunk:
-            chunks.append("\n\n".join(current))
-            current = [block]
-        else:
-            current.append(block)
-    if current:
-        chunks.append("\n\n".join(current))
-
-    sanitized_chunks: list[str] = []
-    for chunk in chunks:
-        if len(chunk) <= _NEWS_FIELD_HARD_LIMIT:
-            sanitized_chunks.append(chunk)
-            continue
-        split_blocks = chunk.split("\n\n")
-        rolling: list[str] = []
-        for block in split_blocks:
-            rolling_candidate = "\n\n".join([*rolling, block]) if rolling else block
-            if rolling and len(rolling_candidate) > _NEWS_FIELD_HARD_LIMIT:
-                sanitized_chunks.append("\n\n".join(rolling))
-                rolling = [block]
-            else:
-                rolling.append(block)
-        if rolling:
-            sanitized_chunks.append("\n\n".join(rolling))
-    return sanitized_chunks
-
-
 def similarity_title(a: str, b: str) -> float:
     return SequenceMatcher(None, sanitize_plain_text(a).lower(), sanitize_plain_text(b).lower()).ratio()
 
 
+def news_edition_label_for_datetime(dt: datetime) -> tuple[str, str]:
+    local_dt = dt.astimezone(_ITALY_TZ)
+    minute_of_day = local_dt.hour * 60 + local_dt.minute
+    if 5 * 60 <= minute_of_day <= 11 * 60 + 59:
+        return "EDIZIONE MATTUTINA", "mattina"
+    if 12 * 60 <= minute_of_day <= 17 * 60 + 59:
+        return "EDIZIONE POMERIDIANA", "pomeriggio"
+    if 18 * 60 <= minute_of_day <= 22 * 60 + 59:
+        return "EDIZIONE SERALE", "sera"
+    return "EDIZIONE NOTTURNA", "notte"
+
+
 def _time_of_day_label(dt: datetime) -> str:
-    hour = dt.hour
-    if 6 <= hour < 12:
-        return "mattina"
-    if 12 <= hour < 18:
-        return "pomeriggio"
-    if 18 <= hour < 23:
-        return "sera"
-    return "notte"
+    return news_edition_label_for_datetime(dt)[1]
 
 
 def _overview_now(payload: dict[str, Any]) -> datetime:
@@ -378,7 +343,8 @@ def _overview_now(payload: dict[str, Any]) -> datetime:
     if isinstance(raw, str):
         try:
             parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            base = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return base.astimezone(timezone.utc)
         except ValueError:
             pass
     return datetime.now(timezone.utc)
@@ -407,46 +373,145 @@ def _normalized_story_identity(item: dict[str, Any]) -> str:
     return ""
 
 
-def _iter_news_categories(payload: dict[str, Any], *, max_categories: int = _NEWS_MAX_CATEGORIES) -> list[tuple[str, str, str, list[dict[str, Any]]]]:
-    selected: list[tuple[str, str, str, list[dict[str, Any]]]] = []
+def _parse_news_datetime(raw: Any) -> datetime | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _news_item_sort_key(item: dict[str, Any]) -> tuple[float, float]:
+    published = _parse_news_datetime(item.get("published_at")) or datetime(1970, 1, 1, tzinfo=timezone.utc)
+    quality = len(sanitize_plain_text(str(item.get("title") or ""))) + len(_build_news_item_summary(item, display=""))
+    return (published.timestamp(), float(quality))
+
+
+def _score_news_item(item: dict[str, Any], *, now_utc: datetime) -> float:
+    title = sanitize_plain_text(str(item.get("title") or ""))
+    summary = _build_news_item_summary(item, display="")
+    source = str(item.get("source") or "").lower()
+    published = _parse_news_datetime(item.get("published_at"))
+    age_hours = 72.0
+    if published is not None:
+        age_hours = max(0.0, (now_utc - published.astimezone(timezone.utc)).total_seconds() / 3600.0)
+    recency_score = max(0.0, 40.0 - min(age_hours, 40.0))
+    title_quality = min(len(title), 120) / 4.0
+    summary_quality = min(len(summary), 220) / 8.0
+    reliability = 6.0 if any(token in source for token in ["ansa", "repubblica", "corriere", "ilpost"]) else 0.0
+    return recency_score + title_quality + summary_quality + reliability
+
+
+def _build_single_news_field_value(item: dict[str, Any], *, display: str) -> str:
+    for summary_limit in [280, 220, 170]:
+        value = _format_news_item_block(
+            item,
+            display=display,
+            numbered=False,
+            index=0,
+            max_summary_chars=summary_limit,
+        )
+        if len(value) <= _NEWS_FIELD_HARD_LIMIT:
+            return value
+    return _format_news_item_block(item, display=display, numbered=False, index=0, max_summary_chars=120)[:_NEWS_FIELD_HARD_LIMIT]
+
+
+def _iter_all_news_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    categories = payload.get("categories", {})
+    if not isinstance(categories, dict):
+        return []
+    merged: list[dict[str, Any]] = []
+    for items in categories.values():
+        merged.extend(_valid_news_items(items))
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in sorted(merged, key=_news_item_sort_key, reverse=True):
+        key = _normalized_story_identity(item)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _select_editorial_categories(
+    payload: dict[str, Any],
+    *,
+    excluded_story_keys: set[str],
+) -> list[tuple[str, str, str, dict[str, Any]]]:
+    selected: list[tuple[str, str, str, dict[str, Any]]] = []
     categories = payload.get("categories", {})
     if not isinstance(categories, dict):
         return selected
     configured = payload.get("configured_categories")
     configured_order = [str(category).strip().lower() for category in configured] if isinstance(configured, list) else []
-    ordered_categories = list(categories.keys())
-    if configured_order:
-        known = {str(category).strip().lower(): category for category in ordered_categories}
-        ordered_categories = [known[key] for key in configured_order if key in known]
-    seen_story_keys: set[str] = set()
-    total_selected_items = 0
-    for category in ordered_categories:
-        items = categories.get(category)
-        valid_items = _valid_news_items(items)
-        if not valid_items:
+    if not configured_order:
+        configured_order = [str(cat).strip().lower() for cat in categories.keys()]
+    available = {str(category).strip().lower(): category for category in categories.keys()}
+    for configured_category in configured_order:
+        mapped_category = available.get(configured_category)
+        if mapped_category is None:
             continue
-        display = get_category_display_name(str(category))
-        if display.upper() in {"VARIE", "TITOLI IN EVIDENZA"}:
-            continue
-        category_items: list[dict[str, Any]] = []
+        valid_items = sorted(_valid_news_items(categories.get(mapped_category)), key=_news_item_sort_key, reverse=True)
+        chosen_item: dict[str, Any] | None = None
         for item in valid_items:
-            if len(category_items) >= _NEWS_MAX_ITEMS_PER_FIELD:
-                break
-            if total_selected_items >= _NEWS_MAX_TOTAL_ITEMS:
-                break
-            story_key = _normalized_story_identity(item)
-            if not story_key or story_key in seen_story_keys:
+            key = _normalized_story_identity(item)
+            if not key or key in excluded_story_keys:
                 continue
-            category_items.append(item)
-            seen_story_keys.add(story_key)
-            total_selected_items += 1
-        if not category_items:
+            chosen_item = item
+            excluded_story_keys.add(key)
+            break
+        if chosen_item is None:
             continue
-        emoji = get_category_emoji(str(category))
-        selected.append((str(category), display, emoji, category_items))
-        if len(selected) >= max_categories or total_selected_items >= _NEWS_MAX_TOTAL_ITEMS:
+        display = get_category_display_name(mapped_category)
+        selected.append((mapped_category, display, get_category_emoji(mapped_category), chosen_item))
+        if len(selected) >= _NEWS_MAX_EDITORIAL_CATEGORIES:
             break
     return selected
+
+
+def _daily_rotating_pick(pool: list[str], *, base_dt: datetime) -> str:
+    if not pool:
+        return ""
+    day_index = int(base_dt.astimezone(_ITALY_TZ).strftime("%Y%m%d"))
+    return pool[day_index % len(pool)]
+
+
+def _normalize_news_extras(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        tokens = [str(item).strip().lower() for item in raw]
+    else:
+        text = str(raw or "").strip()
+        parsed_tokens: list[str] | None = None
+        if text.startswith("["):
+            try:
+                import json
+
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    parsed_tokens = [str(item).strip().lower() for item in parsed]
+            except Exception:
+                parsed_tokens = None
+        tokens = parsed_tokens if parsed_tokens is not None else [str(item).strip().lower() for item in text.split(",")]
+    normalized: list[str] = []
+    for token in tokens:
+        if token in NEWS_EXTRA_ORDER and token not in normalized:
+            normalized.append(token)
+    return normalized
+
+
+def _next_news_run_field(config: dict[str, Any], *, generated_at: datetime) -> str | None:
+    interval = int(config.get("interval_minutes") or 0)
+    if interval <= 0:
+        return None
+    next_run = generated_at.astimezone(_ITALY_TZ) + timedelta(minutes=interval)
+    return (
+        "Il criceto chiude il taccuino per ora. "
+        f"Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
+    )
 
 
 def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, Any]]]]) -> str | None:
@@ -466,38 +531,73 @@ def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, 
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
     title = "📰 HAMSTER NEWS"
-    embeds: list[discord.Embed] = []
-    category_rows = _iter_news_categories(payload)
-    overview = discord.Embed(title=format_standard_title(f"{title} • Panoramica"), color=color)
-    tone = _time_of_day_label(_overview_now(payload))
-    daypart = tone if tone in {"mattina", "pomeriggio", "sera"} else "sera"
-    if category_rows:
-        overview.description = format_standard_description(
-            (
-                f"🐹 Buona **{daypart}**: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
-                "Titoli caldi, pochi giri di parole e dritti al punto.\n"
-                "**Che ci dice il mondo quest'oggi?**"
-            ),
-            blank_line_before_fields=True,
-        )
-    else:
-        overview.description = format_standard_description(
-            (
-                f"🐹 Buona **{daypart}**: Barcellometro è in redazione, oggi è più calma ma il radar resta acceso. "
-                "Se spunta qualcosa di succoso, noi ci siamo.\n"
-                "**Che ci dice il mondo quest'oggi?**"
-            ),
-        )
-    for _, display, emoji, items in category_rows:
-        field_value = _build_news_category_field_value(items, display=display)
-        if not field_value:
-            continue
+    now_utc = _overview_now(payload)
+    edition_label, daypart = news_edition_label_for_datetime(now_utc)
+    overview = discord.Embed(title=format_standard_title(f"{title} • {edition_label}"), color=color)
+    overview.description = format_standard_description(
+        (
+            f"🐹 Buona **{daypart}**: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
+            "Titoli caldi, pochi giri di parole e dritti al punto.\n"
+            "**Che ci dice il mondo quest'oggi?**"
+        ),
+        blank_line_before_fields=True,
+    )
+    all_items = _iter_all_news_items(payload)
+    excluded_keys: set[str] = set()
+    latest_item = all_items[0] if all_items else None
+    if latest_item is not None:
+        latest_key = _normalized_story_identity(latest_item)
+        if latest_key:
+            excluded_keys.add(latest_key)
         overview.add_field(
-            name=format_standard_field_name(display, emoji=emoji),
-            value=field_value,
+            name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
+            value=_build_single_news_field_value(latest_item, display="ULTIM'ORA"),
             inline=False,
         )
-    first_image_url = _first_story_image_url(category_rows)
+    highlighted: dict[str, Any] | None = None
+    for item in sorted(all_items, key=lambda candidate: _score_news_item(candidate, now_utc=now_utc), reverse=True):
+        item_key = _normalized_story_identity(item)
+        if not item_key or item_key in excluded_keys:
+            continue
+        highlighted = item
+        excluded_keys.add(item_key)
+        break
+    if highlighted is not None:
+        overview.add_field(
+            name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
+            value=_build_single_news_field_value(highlighted, display="IN EVIDENZA"),
+            inline=False,
+        )
+    editorial_categories = _select_editorial_categories(payload, excluded_story_keys=excluded_keys)
+    for _, display, _, item in editorial_categories:
+        overview.add_field(
+            name=format_standard_field_name(f"{display} IN PRIMO PIANO"),
+            value=_build_single_news_field_value(item, display=display),
+            inline=False,
+        )
+    extras_enabled = _normalize_news_extras(config.get("extras_json"))
+    for extra in NEWS_EXTRA_ORDER:
+        if extra not in extras_enabled:
+            continue
+        title_text, emoji = NEWS_EXTRA_FIELD_TITLES[extra]
+        content = _daily_rotating_pick(NEWS_EXTRA_CATALOG[extra], base_dt=now_utc)
+        if not content:
+            continue
+        overview.add_field(
+            name=format_standard_field_name(title_text, emoji=emoji),
+            value=content[:_NEWS_FIELD_HARD_LIMIT],
+            inline=False,
+        )
+    next_run_field = _next_news_run_field(config, generated_at=now_utc)
+    if next_run_field:
+        overview.add_field(
+            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
+            value=next_run_field,
+            inline=False,
+        )
+    first_image_url = _first_story_image_url([(cat, d, e, [item]) for cat, d, e, item in editorial_categories])
+    if first_image_url is None and latest_item is not None:
+        first_image_url = _first_story_image_url([("ultimora", "Ultim'ora", "⚡", [latest_item])])
     attach_embed_images_meta(
         overview,
         service_name="campagne_notizie",
