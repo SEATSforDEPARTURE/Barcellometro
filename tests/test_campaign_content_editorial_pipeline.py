@@ -191,8 +191,8 @@ def test_news_description_uses_natural_greetings_by_daypart() -> None:
     cases = [
         ("2026-04-09T06:30:00+02:00", "Buon mattino"),
         ("2026-04-09T14:30:00+02:00", "Buon pomeriggio"),
-        ("2026-04-09T20:30:00+02:00", "Buonasera"),
-        ("2026-04-09T01:30:00+02:00", "Buona notte"),
+        ("2026-04-09T20:30:00+02:00", "Buon sera"),
+        ("2026-04-09T01:30:00+02:00", "Buon sera"),
     ]
     for generated_at, expected in cases:
         news = build_news_embeds(
@@ -202,8 +202,9 @@ def test_news_description_uses_natural_greetings_by_daypart() -> None:
         description = news[0].description or ""
         assert not description.lstrip().startswith("🐹")
         assert expected in description
+        assert "in regia 🐹" in description
         assert "📰" in description
-        assert "**Che ci racconta il mondo oggi?**" in description
+        assert "Che ci racconta il mondo oggi?" in description
         assert "Buona pomeriggio" not in description
 
 
