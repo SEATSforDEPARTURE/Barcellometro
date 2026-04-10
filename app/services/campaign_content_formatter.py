@@ -330,28 +330,35 @@ def _is_useless_news_text(text: str) -> bool:
     return not normalized or normalized in _NEWS_BAD_FALLBACKS
 
 
-def _take_news_sentences(text: str, *, max_sentences: int = 99) -> str:
+def extract_first_sentences(text: str, max_sentences: int = 2) -> str:
+    """
+    Normalize HTML/text and return at most the first N complete sentences.
+    Never cut a sentence in the middle.
+    """
+    if max_sentences <= 0:
+        return ""
     candidate = sanitize_public_news_text(text)
     if not candidate:
         return ""
-    sentences = re.split(r"(?<=[.!?])\s+", candidate)
-    picked: list[str] = []
-    for sentence in sentences:
-        normalized = sentence.strip()
-        if not normalized:
-            continue
-        picked.append(normalized)
-        if len(picked) >= max_sentences:
-            break
-    return " ".join(picked) if picked else candidate
+    sentence_pattern = re.compile(r'[^.!?]*[.!?](?:["”’»)\]]+)?', flags=re.UNICODE)
+    picked: list[str] = [match.group(0).strip() for match in sentence_pattern.finditer(candidate) if match.group(0).strip()]
+    if not picked:
+        return candidate
+    if len(picked) >= max_sentences:
+        return " ".join(picked[:max_sentences]).strip()
+    consumed = sum(len(match.group(0)) for match in sentence_pattern.finditer(candidate))
+    tail = candidate[consumed:].strip()
+    if tail:
+        picked.append(tail)
+    return " ".join(picked[:max_sentences]).strip()
 
 
 def _first_real_news_sentences(item: dict[str, Any]) -> str:
-    for key in ("summary", "description", "excerpt", "content", "text"):
+    for key in ("description", "excerpt", "content", "text"):
         candidate = sanitize_public_news_text(str(item.get(key) or ""))
         if _is_useless_news_text(candidate):
             continue
-        return _take_news_sentences(candidate)
+        return extract_first_sentences(candidate, max_sentences=2)
     return "Dettagli in aggiornamento."
 
 
@@ -463,7 +470,7 @@ def _starts_with_bot_comment(text: str) -> bool:
 
 def _build_news_summary_body(raw_summary: str, *, item: dict[str, Any], display: str, tone: str) -> str:
     _ = (display, tone)
-    cleaned = _take_news_sentences(raw_summary, max_sentences=99)
+    cleaned = sanitize_public_news_text(raw_summary)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
     cleaned = re.sub(r"^\s*[:\-–|]+\s*", "", cleaned).strip()
@@ -478,7 +485,7 @@ def _build_news_summary_body(raw_summary: str, *, item: dict[str, Any], display:
     source_hint = sanitize_public_news_text(str(item.get("summary") or ""))
     if source_hint and SequenceMatcher(None, cleaned.lower(), source_hint.lower()).ratio() >= 0.9:
         cleaned = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
-    cleaned = _take_news_sentences(cleaned, max_sentences=99)
+    cleaned = sanitize_public_news_text(cleaned)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
     cleaned = cleaned.strip()

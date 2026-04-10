@@ -89,6 +89,83 @@ def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
     assert "Terza frase da ignorare." not in field_value
 
 
+def test_news_fallback_summary_with_one_sentence_keeps_single_sentence() -> None:
+    payload = {
+        "categories": {
+            "economia": [
+                {
+                    "title": "Mercati in movimento",
+                    "summary": "",
+                    "description": "<p>Solo una frase completa.</p>",
+                    "source": "ansa.it",
+                    "link": "https://example.com/mercati",
+                }
+            ]
+        }
+    }
+    field_value = build_news_embeds({}, payload)[0].fields[0].value
+    assert "Solo una frase completa." in field_value
+    assert "Solo una frase completa.." not in field_value
+
+
+def test_news_fallback_summary_never_cuts_sentence_midway() -> None:
+    payload = {
+        "categories": {
+            "economia": [
+                {
+                    "title": "Mercati in movimento",
+                    "summary": "",
+                    "description": "<p>Prima frase molto lunga ma completa.</p><p>Seconda frase con chiusura!</p><p>Terza da escludere.</p>",
+                    "source": "ansa.it",
+                    "link": "https://example.com/mercati",
+                }
+            ]
+        }
+    }
+    field_value = build_news_embeds({}, payload)[0].fields[0].value
+    assert "Prima frase molto lunga ma completa." in field_value
+    assert "Seconda frase con chiusura!" in field_value
+    assert "Terza da escludere." not in field_value
+
+
+def test_news_explicit_summary_is_preferred_over_description_fallback() -> None:
+    payload = {
+        "categories": {
+            "economia": [
+                {
+                    "title": "Mercati in movimento",
+                    "summary": "Sintesi editoriale pronta.",
+                    "description": "<p>Prima frase.</p><p>Seconda frase.</p><p>Terza frase da ignorare.</p>",
+                    "source": "ansa.it",
+                    "link": "https://example.com/mercati",
+                }
+            ]
+        }
+    }
+    field_value = build_news_embeds({}, payload)[0].fields[0].value
+    assert "sintesi editoriale pronta." in field_value.lower()
+    assert "Terza frase da ignorare." not in field_value
+
+
+def test_news_highlight_formatting_survives_fallback_rendering() -> None:
+    payload = {
+        "categories": {
+            "tecnologia": [
+                {
+                    "title": "Lancio piattaforma",
+                    "summary": "",
+                    "description": "<p>Accordo con Netflix per nuovi contenuti.</p><p>Seconda frase utile.</p><p>Terza frase da ignorare.</p>",
+                    "source": "wired.it",
+                    "link": "https://example.com/tech",
+                }
+            ]
+        }
+    }
+    field_value = build_news_embeds({}, payload)[0].fields[0].value
+    assert "**Netflix**" in field_value
+    assert "Terza frase da ignorare." not in field_value
+
+
 def test_news_edition_label_switches_by_timeslot() -> None:
     morning = news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T05:30:00+02:00"))[0]
     afternoon = news_edition_label_for_datetime(datetime.fromisoformat("2026-04-09T12:30:00+02:00"))[0]
