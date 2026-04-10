@@ -321,9 +321,12 @@ def test_news_service_label_maps_to_campaigns_and_not_unknown() -> None:
 
 def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -> None:
     payload = {
+        "configured_categories": ["varie"],
         "categories": {
-            "cronaca": [{"title": "C1", "summary": "S", "source": "ansa", "link": "https://example.com/1"}],
-            "sport": [{"title": "S1", "summary": "S", "source": "gazzetta", "link": "https://example.com/2"}],
+            "cronaca": [
+                {"title": "C1", "summary": "S", "source": "ansa", "link": "https://example.com/1", "published_at": "2026-04-09T10:00:00+00:00"},
+                {"title": "C2", "summary": "S", "source": "ansa", "link": "https://example.com/2", "published_at": "2026-04-09T09:00:00+00:00"},
+            ],
             "varie": [{"title": "V1", "summary": "S", "source": "misc", "link": "https://example.com/3"}],
         }
     }
@@ -332,7 +335,7 @@ def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -
     page_map = build_news_page_map(payload)
     overview_field_labels = [field.name for field in overview.fields]
 
-    assert all("VARIE" not in name for name in overview_field_labels)
+    assert any("VARIE IN PRIMO PIANO" in name for name in overview_field_labels)
     assert all("TITOLI IN EVIDENZA" not in name for name in overview_field_labels)
 
     assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]

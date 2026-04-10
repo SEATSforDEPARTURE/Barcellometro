@@ -1,3 +1,5 @@
+import logging
+
 from app.services.campaign_content_formatter import select_final_news_slots
 
 
@@ -183,3 +185,80 @@ def test_category_slot_tries_next_item_when_first_is_already_used() -> None:
     category_slot = _slots_by_category(slots).get("cronaca")
     assert category_slot is not None
     assert category_slot["item"]["title"] == "Cronaca C"
+
+
+def test_varie_category_is_eligible_when_configured_and_present() -> None:
+    payload = {
+        "campaign_id": 16,
+        "configured_categories": ["varie"],
+        "categories": {
+            "cronaca": [
+                {"title": "Cronaca 1", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-1", "published_at": "2026-04-09T10:00:00+00:00"},
+                {"title": "Cronaca 2", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-2", "published_at": "2026-04-09T09:00:00+00:00"},
+            ],
+            "varie": [{"title": "Varie 1", "summary": "S", "source": "ansa", "link": "https://example.com/varie-1"}],
+        },
+    }
+    slots = select_final_news_slots(payload)
+    assert "varie" in _slots_by_category(slots)
+
+
+def test_logs_reason_when_category_has_no_valid_unused_items(caplog) -> None:
+    caplog.set_level(logging.DEBUG, logger="app.services.campaign_content_formatter")
+    payload = {
+        "campaign_id": 16,
+        "configured_categories": ["trash"],
+        "categories": {
+            "cronaca": [
+                {"title": "Cronaca 1", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-1", "published_at": "2026-04-09T10:00:00+00:00"},
+                {"title": "Cronaca 2", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-2", "published_at": "2026-04-09T09:00:00+00:00"},
+            ],
+            "trash": [
+                {"title": "Cronaca 1", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-1"},
+                {"title": "Cronaca 2", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-2"},
+            ],
+        },
+    }
+    slots = select_final_news_slots(payload)
+    assert "trash" not in _slots_by_category(slots)
+    assert "reason=no_valid_unused_items" in caplog.text
+    assert "category=trash" in caplog.text
+
+
+def test_duplicate_prevention_logs_priority_duplicate_reason(caplog) -> None:
+    caplog.set_level(logging.DEBUG, logger="app.services.campaign_content_formatter")
+    payload = {
+        "campaign_id": 16,
+        "configured_categories": ["trash"],
+        "categories": {
+            "cronaca": [
+                {"title": "Cronaca 1", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-1", "published_at": "2026-04-09T10:00:00+00:00"},
+                {"title": "Cronaca 2", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-2", "published_at": "2026-04-09T09:00:00+00:00"},
+            ],
+            "trash": [
+                {"title": "Cronaca 1", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-1"},
+            ],
+        },
+    }
+    slots = select_final_news_slots(payload)
+    assert "trash" not in _slots_by_category(slots)
+    assert "reason=already_used_by_priority_slot" in caplog.text
+
+
+def test_editorial_order_respects_configured_categories_when_all_valid() -> None:
+    payload = {
+        "campaign_id": 16,
+        "configured_categories": ["curiosità", "trash", "varie"],
+        "categories": {
+            "cronaca": [
+                {"title": "Cronaca 1", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-1", "published_at": "2026-04-09T10:00:00+00:00"},
+                {"title": "Cronaca 2", "summary": "S", "source": "ansa", "link": "https://example.com/cronaca-2", "published_at": "2026-04-09T09:00:00+00:00"},
+            ],
+            "curiosità": [{"title": "Curiosità 1", "summary": "S", "source": "ansa", "link": "https://example.com/curiosita-1"}],
+            "trash": [{"title": "Trash 1", "summary": "S", "source": "ansa", "link": "https://example.com/trash-1"}],
+            "varie": [{"title": "Varie 1", "summary": "S", "source": "ansa", "link": "https://example.com/varie-1"}],
+        },
+    }
+    slots = select_final_news_slots(payload)
+    category_order = [str(slot.get("category")) for slot in slots if slot.get("slot") == "category"]
+    assert category_order == ["curiosità", "trash", "varie"]
