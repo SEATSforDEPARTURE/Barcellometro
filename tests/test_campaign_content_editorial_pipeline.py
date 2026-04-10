@@ -23,7 +23,9 @@ from app.services.campaign_content_formatter import (
     build_horoscope_embeds,
     build_news_embeds,
     build_news_page_map,
+    highlight_key_terms,
     news_edition_label_for_datetime,
+    select_final_news_slots,
     build_weather_embeds,
 )
 from app.services.campaign_content_service import CampaignContentService
@@ -194,6 +196,70 @@ def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
     assert all("IN PRIMO PIANO" in name for name in editorial)
 
 
+def test_news_editorial_categories_render_configured_order_including_trash() -> None:
+    payload = {
+        "configured_categories": ["curiosità", "trash", "varie"],
+        "categories": {
+            "curiosità": [{"title": "Curiosità valida", "summary": "S", "source": "ansa", "link": "https://example.com/c"}],
+            "trash": [{"title": "Trash valida", "summary": "S", "source": "ansa", "link": "https://example.com/t"}],
+            "varie": [{"title": "Varie valida", "summary": "S", "source": "ansa", "link": "https://example.com/v"}],
+        },
+    }
+    fields = [field.name for field in build_news_embeds({}, payload)[0].fields]
+    editorial = [name for name in fields if "IN PRIMO PIANO" in name]
+    assert editorial == [
+        "🤔 __**CURIOSITÀ IN PRIMO PIANO**__",
+        "🗑️ __**TRASH IN PRIMO PIANO**__",
+        "🗂️ __**VARIE IN PRIMO PIANO**__",
+    ]
+
+
+def test_news_editorial_trash_renders_placeholder_when_no_valid_item() -> None:
+    payload = {
+        "configured_categories": ["trash"],
+        "categories": {
+            "cronaca": [{"title": "Cronaca valida", "summary": "S", "source": "ansa", "link": "https://example.com/c"}],
+            "trash": [{"title": "", "summary": "", "source": "ansa", "link": ""}],
+        },
+    }
+    overview = build_news_embeds({}, payload)[0]
+    trash_field = next(field for field in overview.fields if "TRASH IN PRIMO PIANO" in field.name)
+    assert trash_field.value == "Nessuna notizia valida disponibile al momento per questa categoria."
+
+
+def test_news_editorial_trash_not_silently_skipped_when_under_limit() -> None:
+    payload = {
+        "configured_categories": ["curiosità", "trash"],
+        "categories": {
+            "cronaca": [{"title": "Cronaca valida", "summary": "S", "source": "ansa", "link": "https://example.com/c"}],
+            "curiosità": [{"title": "Curiosità valida", "summary": "S", "source": "ansa", "link": "https://example.com/u"}],
+            "trash": [{"title": "", "summary": "", "source": "ansa", "link": ""}],
+        },
+    }
+    slots = select_final_news_slots(payload)
+    editorial_slots = [slot for slot in slots if slot.get("slot") == "category"]
+    assert [slot.get("category") for slot in editorial_slots] == ["curiosità", "trash"]
+    assert editorial_slots[1].get("item") is None
+
+
+def test_news_editorial_logs_limit_skip_reason(caplog) -> None:
+    payload = {
+        "campaign_id": 42,
+        "configured_categories": ["curiosità", "trash", "varie", "sport"],
+        "categories": {
+            "cronaca": [{"title": "Cronaca valida", "summary": "S", "source": "ansa", "link": "https://example.com/c"}],
+            "curiosità": [{"title": "Curiosità valida", "summary": "S", "source": "ansa", "link": "https://example.com/u"}],
+            "trash": [{"title": "Trash valida", "summary": "S", "source": "ansa", "link": "https://example.com/t"}],
+            "varie": [{"title": "Varie valida", "summary": "S", "source": "ansa", "link": "https://example.com/v"}],
+            "sport": [{"title": "Sport valida", "summary": "S", "source": "ansa", "link": "https://example.com/s"}],
+        },
+    }
+    caplog.set_level("DEBUG")
+    select_final_news_slots(payload)
+    assert "reason=max_category_limit_reached" in caplog.text
+    assert "category=sport" in caplog.text
+
+
 def test_news_embed_tail_comments_not_repeated_across_slots() -> None:
     payload = {
         "configured_categories": ["cronaca", "politica", "tecnologia"],
@@ -207,6 +273,38 @@ def test_news_embed_tail_comments_not_repeated_across_slots() -> None:
     target_fields = [f for f in fields if "ULTIM'ORA" in f.name or "IN EVIDENZA" in f.name or "IN PRIMO PIANO" in f.name]
     tails = [str(field.value).split("• ", 1)[-1].split("`fonte:", 1)[0].strip().split(". ")[-1] for field in target_fields]
     assert len(tails) == len(set(tails))
+
+
+def test_highlight_key_terms_formats_gli_stati_uniti_without_partial_fragment() -> None:
+    text = "Gli Stati Uniti hanno registrato nuovi dati."
+    rendered = highlight_key_terms(text)
+    assert rendered == "Gli **Stati Uniti** hanno registrato nuovi dati."
+
+
+def test_highlight_key_terms_prefers_longest_overlapping_span() -> None:
+    text = "Gli Stati Uniti incontrano delegazioni estere."
+    rendered = highlight_key_terms(text)
+    assert "**Stati Uniti**" in rendered
+    assert "**Stati**" not in rendered
+
+
+def test_highlight_key_terms_keeps_full_person_names() -> None:
+    text = "Donald Trump e Benjamin Netanyahu commentano l'esito."
+    rendered = highlight_key_terms(text)
+    assert rendered == "**Donald Trump** e **Benjamin Netanyahu** commentano l'esito."
+
+
+def test_highlight_key_terms_never_emits_broken_markdown_markers() -> None:
+    text = "Gli Stati Uniti e Donald Trump discutono con Benjamin Netanyahu."
+    rendered = highlight_key_terms(text)
+    assert rendered.count("**") % 2 == 0
+    assert "****" not in rendered
+
+
+def test_highlight_key_terms_keeps_existing_curated_phrases() -> None:
+    text = "Gli esperti temono un mix catastrofico nel weekend."
+    rendered = highlight_key_terms(text)
+    assert "**mix catastrofico**" in rendered
 
 
 def test_news_title_has_emoji_outside_markdown() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -128,15 +129,21 @@ def slugify_label(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_") or "default"
 
 
+def _normalize_news_category_label(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_like = "".join(char for char in normalized if not unicodedata.combining(char))
+    return slugify_label(ascii_like).replace("_", " ")
+
+
 def get_category_display_name(category: str) -> str:
-    key = slugify_label(category).replace("_", " ")
+    key = _normalize_news_category_label(category)
     if key in CATEGORY_DISPLAY_NAMES:
         return CATEGORY_DISPLAY_NAMES[key]
     return " ".join(part.capitalize() for part in key.split()) or "Varie"
 
 
 def get_category_emoji(category: str) -> str:
-    key = slugify_label(category).replace("_", " ")
+    key = _normalize_news_category_label(category)
     return CATEGORY_EMOJIS.get(key, "📌")
 
 
@@ -238,6 +245,22 @@ _IMPORTANT_PHRASES = (
     "colpo di scena",
     "tensione alle stelle",
     "record assoluto",
+)
+_ITALIAN_LEADING_ARTICLES = (
+    "il",
+    "lo",
+    "la",
+    "i",
+    "gli",
+    "le",
+    "un",
+    "uno",
+    "una",
+    "del",
+    "della",
+    "dei",
+    "degli",
+    "delle",
 )
 _NEWS_EMOJI_RE = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]",
@@ -534,28 +557,54 @@ def highlight_key_terms(text: str) -> str:
     cleaned = sanitize_public_news_text(text)
     if not cleaned:
         return ""
-    highlights: list[tuple[int, int]] = []
+    candidates: list[tuple[int, int]] = []
 
-    def _add_span(start: int, end: int) -> None:
+    def _trim_leading_article(start: int, end: int) -> tuple[int, int]:
+        snippet = cleaned[start:end]
+        article_match = re.match(r"^\s*([A-Za-zÀ-ÖØ-öø-ÿ']+)\s+", snippet)
+        if not article_match:
+            return start, end
+        token = article_match.group(1).lower()
+        if token not in _ITALIAN_LEADING_ARTICLES:
+            return start, end
+        trimmed_start = start + article_match.end()
+        trimmed_text = cleaned[trimmed_start:end].strip()
+        if " " not in trimmed_text:
+            return start, end
+        return trimmed_start, end
+
+    def _add_candidate(start: int, end: int) -> None:
         if start >= end:
             return
-        for span_start, span_end in highlights:
-            if not (end <= span_start or start >= span_end):
-                return
-        highlights.append((start, end))
+        normalized_start, normalized_end = _trim_leading_article(start, end)
+        if normalized_start >= normalized_end:
+            return
+        candidates.append((normalized_start, normalized_end))
+
+    def _resolve_non_overlapping_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        ranked = sorted(spans, key=lambda span: (-(span[1] - span[0]), span[0], span[1]))
+        selected: list[tuple[int, int]] = []
+        for start, end in ranked:
+            if any(not (end <= chosen_start or start >= chosen_end) for chosen_start, chosen_end in selected):
+                continue
+            selected.append((start, end))
+        return sorted(selected, key=lambda span: span[0])[:4]
 
     for platform in _IMPORTANT_PLATFORM_TERMS:
         for match in re.finditer(rf"\b{re.escape(platform)}\b", cleaned):
-            _add_span(match.start(), match.end())
+            _add_candidate(match.start(), match.end())
 
     for phrase in _IMPORTANT_PHRASES:
         for match in re.finditer(rf"\b{re.escape(phrase)}\b", cleaned, flags=re.IGNORECASE):
-            _add_span(match.start(), match.end())
+            _add_candidate(match.start(), match.end())
 
-    for match in re.finditer(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", cleaned):
-        _add_span(match.start(), match.end())
+    for match in re.finditer(
+        r"\b(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ']+\s+){1,3}[A-Z][A-Za-zÀ-ÖØ-öø-ÿ']+\b",
+        cleaned,
+    ):
+        _add_candidate(match.start(), match.end())
 
-    highlights = sorted(highlights, key=lambda span: (span[0], -(span[1] - span[0])))[:4]
+    highlights = _resolve_non_overlapping_spans(candidates)
     if not highlights:
         return cleaned
     rendered: list[str] = []
@@ -742,12 +791,21 @@ def _iter_configured_editorial_categories(payload: dict[str, Any]) -> list[str]:
     selected: list[str] = []
     seen: set[str] = set()
     for category in ordered:
-        key = category.lower()
+        key = _normalize_editorial_category_key(category)
         if key in seen:
+            logger.debug(
+                "campaign_news editorial category skip: campaign_id=%s category=%s reason=duplicate_config_entry candidates=0",
+                _campaign_debug_id(payload),
+                category,
+            )
             continue
         seen.add(key)
-        selected.append(category)
+        selected.append(key)
     return selected
+
+
+def _normalize_editorial_category_key(category: Any) -> str:
+    return _normalize_news_category_label(category)
 
 
 def _campaign_debug_id(payload: dict[str, Any]) -> Any:
@@ -777,28 +835,28 @@ def _contains_keyword_blob(blob: str, keyword: str) -> bool:
 
 
 def _is_known_news_category(category: str) -> bool:
-    normalized = slugify_label(category).replace("_", " ")
+    normalized = _normalize_news_category_label(category)
     return normalized in _CATEGORY_MATCH_KEYWORDS
 
 
 def _category_keyword_hits(blob: str, category: str) -> int:
-    normalized = slugify_label(category).replace("_", " ")
+    normalized = _normalize_news_category_label(category)
     keywords = _CATEGORY_MATCH_KEYWORDS.get(normalized, ())
     return sum(1 for keyword in keywords if _contains_keyword_blob(blob, keyword))
 
 
 def _score_item_category_match(item: dict[str, Any], category: str) -> float:
-    requested = slugify_label(category).replace("_", " ")
+    requested = _normalize_news_category_label(category)
     blob = _tokenize_news_blob(item)
     if not blob:
         return 0.0
     score = 1.0  # candidate comes from the requested bucket
-    assigned = slugify_label(str(item.get("category") or "")).replace("_", " ")
+    assigned = _normalize_news_category_label(item.get("category") or "")
     if assigned == requested:
         score += 1.2
     classified = item.get("classified_categories")
     if isinstance(classified, list):
-        normalized_classified = {slugify_label(str(value)).replace("_", " ") for value in classified}
+        normalized_classified = {_normalize_news_category_label(value) for value in classified}
         if requested in normalized_classified:
             score += 1.0
     raw_categories = item.get("raw_categories")
@@ -829,7 +887,7 @@ def _score_item_category_match(item: dict[str, Any], category: str) -> float:
 
 
 def _item_matches_requested_category(item: dict[str, Any], category: str, *, strict: bool = False) -> bool:
-    requested = slugify_label(category).replace("_", " ")
+    requested = _normalize_news_category_label(category)
     if strict:
         score = _score_item_category_match(item, requested)
         return score >= 2.0
@@ -849,7 +907,7 @@ def _item_matches_requested_category(item: dict[str, Any], category: str, *, str
             strongest_other_category = other_category
     # Soft matching: accept bucket items by default, reject only clear lexical mismatches.
     if strongest_other_hits >= 2 and strongest_other_hits >= requested_hits + 2:
-        assigned = slugify_label(str(item.get("category") or "")).replace("_", " ")
+        assigned = _normalize_news_category_label(item.get("category") or "")
         if assigned and assigned not in (requested, strongest_other_category):
             return True
         return False
@@ -1012,10 +1070,11 @@ def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
     categories = payload.get("categories", {})
     if isinstance(categories, dict):
-        normalized_available = {str(category).strip().lower(): str(category) for category in categories.keys()}
+        normalized_available = {_normalize_editorial_category_key(category): str(category) for category in categories.keys()}
         campaign_id = _campaign_debug_id(payload)
+        editorial_count = 0
         for category in _iter_configured_editorial_categories(payload):
-            normalized_category = str(category).strip().lower()
+            normalized_category = _normalize_editorial_category_key(category)
             if not normalized_category:
                 logger.debug(
                     "campaign_news editorial category skip: campaign_id=%s category=%s reason=empty_category_key candidates=0",
@@ -1023,58 +1082,64 @@ def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     category,
                 )
                 continue
+            if editorial_count >= _NEWS_MAX_EDITORIAL_CATEGORIES:
+                logger.debug(
+                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=max_category_limit_reached candidates=0",
+                    campaign_id,
+                    normalized_category,
+                )
+                continue
             mapped = normalized_available.get(normalized_category)
             if mapped is None:
                 logger.debug(
-                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=no_bucket_for_category candidates=0",
+                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=category_key_normalization_mismatch candidates=0",
                     campaign_id,
                     category,
                 )
                 continue
             category_items = categories.get(mapped)
-            if not isinstance(category_items, list) or not category_items:
-                logger.debug(
-                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=no_items_in_bucket candidates=0",
-                    campaign_id,
-                    mapped,
-                )
-                continue
             selected_item, reason, candidates = _select_editorial_category_item(
                 category_items,
                 category=mapped,
                 used_ids=used_ids,
                 priority_used_ids=priority_used_ids,
             )
+            display = get_category_display_name(mapped)
+            emoji = get_category_emoji(mapped)
             if selected_item is None:
                 logger.debug(
-                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=%s candidates=%s",
+                    "campaign_news editorial category placeholder rendered: campaign_id=%s category=%s reason=%s candidates=%s",
                     campaign_id,
                     mapped,
                     reason or "selection_returned_none",
                     candidates,
                 )
+                selected_slots.append(
+                    {
+                        "slot": "category",
+                        "category": mapped,
+                        "display": display,
+                        "emoji": emoji,
+                        "item": None,
+                        "placeholder_reason": reason or "selection_returned_none",
+                    }
+                )
+                editorial_count += 1
                 continue
             story_id = _news_identity(selected_item)
             if story_id:
                 used_ids.add(story_id)
-            display = get_category_display_name(mapped)
-            logger.debug(
-                "campaign_news editorial category selected: campaign_id=%s category=%s item_id=%s",
-                campaign_id,
-                mapped,
-                story_id or "unknown",
-            )
+            logger.debug("campaign_news editorial category selected: campaign_id=%s category=%s item_id=%s", campaign_id, mapped, story_id or "unknown")
             selected_slots.append(
                 {
                     "slot": "category",
                     "category": mapped,
                     "display": display,
-                    "emoji": get_category_emoji(mapped),
+                    "emoji": emoji,
                     "item": selected_item,
                 }
             )
-            if sum(1 for slot in selected_slots if slot.get("slot") == "category") >= _NEWS_MAX_EDITORIAL_CATEGORIES:
-                break
+            editorial_count += 1
     return selected_slots
 
 
@@ -1104,9 +1169,9 @@ def _first_editorial_story_ids(payload: dict[str, Any]) -> set[str]:
     if not isinstance(categories, dict):
         return set()
     first_ids: set[str] = set()
-    normalized_available = {str(category).strip().lower(): str(category) for category in categories.keys()}
+    normalized_available = {_normalize_editorial_category_key(category): str(category) for category in categories.keys()}
     for category in _iter_configured_editorial_categories(payload):
-        normalized_category = str(category).strip().lower()
+        normalized_category = _normalize_editorial_category_key(category)
         if not normalized_category:
             continue
         mapped = normalized_available.get(normalized_category)
@@ -1214,11 +1279,18 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         if not isinstance(slot, dict):
             continue
         item = slot.get("item")
-        if not isinstance(item, dict):
-            continue
         slot_type = str(slot.get("slot") or "")
         display = str(slot.get("display") or "")
         emoji = str(slot.get("emoji") or "📌")
+        if slot_type == "category" and not isinstance(item, dict):
+            overview.add_field(
+                name=format_standard_field_name(f"{display} IN PRIMO PIANO", emoji=emoji),
+                value="Nessuna notizia valida disponibile al momento per questa categoria.",
+                inline=False,
+            )
+            continue
+        if not isinstance(item, dict):
+            continue
         if slot_type == "ultimora":
             latest_item = item
             overview.add_field(
