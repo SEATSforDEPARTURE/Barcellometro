@@ -739,21 +739,22 @@ def _iter_configured_editorial_categories(payload: dict[str, Any]) -> list[str]:
         ordered = [str(category).strip() for category in configured]
     else:
         ordered = [str(category).strip() for category in categories.keys()]
-    normalized_available = {str(category).strip().lower(): str(category) for category in categories.keys()}
     selected: list[str] = []
     seen: set[str] = set()
     for category in ordered:
         key = category.lower()
-        if not key or key == "varie":
-            continue
-        mapped = normalized_available.get(key)
-        if mapped is None:
-            continue
         if key in seen:
             continue
         seen.add(key)
-        selected.append(mapped)
+        selected.append(category)
     return selected
+
+
+def _campaign_debug_id(payload: dict[str, Any]) -> Any:
+    campaign_id = payload.get("campaign_id")
+    if campaign_id is not None:
+        return campaign_id
+    return payload.get("id")
 
 
 def _tokenize_news_blob(item: dict[str, Any]) -> str:
@@ -952,29 +953,33 @@ def _select_editorial_category_item(
     *,
     category: str,
     used_ids: set[str],
-) -> dict[str, Any] | None:
-    for item in _valid_news_items(category_items):
+    priority_used_ids: set[str] | None = None,
+) -> tuple[dict[str, Any] | None, str, int]:
+    candidates = _valid_news_items(category_items)
+    if not candidates:
+        return None, "no_valid_items", 0
+    saw_priority_duplicate = False
+    saw_editorial_duplicate = False
+    for item in candidates:
         key = _news_identity(item)
         if not key:
-            logger.info("news_category_slot_candidate_skipped category=%s reason=missing_identity", category)
             continue
         if key in used_ids:
-            logger.info(
-                "news_category_slot_candidate_skipped category=%s reason=already_used title=%s",
-                category,
-                sanitize_plain_text(str(item.get("title") or ""))[:100],
-            )
+            if key in (priority_used_ids or set()):
+                saw_priority_duplicate = True
+            else:
+                saw_editorial_duplicate = True
             continue
         if not _item_matches_requested_category(item, category):
-            logger.info(
-                "news_category_slot_candidate_skipped category=%s reason=category_mismatch title=%s score=%.2f",
-                category,
-                sanitize_plain_text(str(item.get("title") or ""))[:100],
-                _score_item_category_match(item, category),
-            )
             continue
-        return item
-    return None
+        return item, "selected", len(candidates)
+    if saw_priority_duplicate and not saw_editorial_duplicate and len(candidates) == 1:
+        return None, "already_used_by_priority_slot", len(candidates)
+    if saw_editorial_duplicate and not saw_priority_duplicate and len(candidates) == 1:
+        return None, "duplicate_of_existing_slot", len(candidates)
+    if saw_priority_duplicate or saw_editorial_duplicate:
+        return None, "no_valid_unused_items", len(candidates)
+    return None, "selection_returned_none", len(candidates)
 
 
 def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1003,33 +1008,68 @@ def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if highlighted_key:
             used_ids.add(highlighted_key)
         selected_slots.append({"slot": "featured", "display": "IN EVIDENZA", "emoji": "🌟", "item": highlighted})
+    priority_used_ids = set(used_ids)
 
     categories = payload.get("categories", {})
     if isinstance(categories, dict):
+        normalized_available = {str(category).strip().lower(): str(category) for category in categories.keys()}
+        campaign_id = _campaign_debug_id(payload)
         for category in _iter_configured_editorial_categories(payload):
-            selected_item = _select_editorial_category_item(
-                categories.get(category),
-                category=category,
+            normalized_category = str(category).strip().lower()
+            if not normalized_category:
+                logger.debug(
+                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=empty_category_key candidates=0",
+                    campaign_id,
+                    category,
+                )
+                continue
+            mapped = normalized_available.get(normalized_category)
+            if mapped is None:
+                logger.debug(
+                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=no_bucket_for_category candidates=0",
+                    campaign_id,
+                    category,
+                )
+                continue
+            category_items = categories.get(mapped)
+            if not isinstance(category_items, list) or not category_items:
+                logger.debug(
+                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=no_items_in_bucket candidates=0",
+                    campaign_id,
+                    mapped,
+                )
+                continue
+            selected_item, reason, candidates = _select_editorial_category_item(
+                category_items,
+                category=mapped,
                 used_ids=used_ids,
+                priority_used_ids=priority_used_ids,
             )
             if selected_item is None:
-                logger.info("news_category_slot_skipped category=%s reason=no_valid_unused_items", category)
+                logger.debug(
+                    "campaign_news editorial category skip: campaign_id=%s category=%s reason=%s candidates=%s",
+                    campaign_id,
+                    mapped,
+                    reason or "selection_returned_none",
+                    candidates,
+                )
                 continue
             story_id = _news_identity(selected_item)
             if story_id:
                 used_ids.add(story_id)
-            display = get_category_display_name(category)
-            logger.info(
-                "news_category_slot_selected category=%s title=%s",
-                category,
-                sanitize_plain_text(str(selected_item.get("title") or ""))[:100],
+            display = get_category_display_name(mapped)
+            logger.debug(
+                "campaign_news editorial category selected: campaign_id=%s category=%s item_id=%s",
+                campaign_id,
+                mapped,
+                story_id or "unknown",
             )
             selected_slots.append(
                 {
                     "slot": "category",
-                    "category": category,
+                    "category": mapped,
                     "display": display,
-                    "emoji": get_category_emoji(category),
+                    "emoji": get_category_emoji(mapped),
                     "item": selected_item,
                 }
             )
@@ -1064,8 +1104,19 @@ def _first_editorial_story_ids(payload: dict[str, Any]) -> set[str]:
     if not isinstance(categories, dict):
         return set()
     first_ids: set[str] = set()
+    normalized_available = {str(category).strip().lower(): str(category) for category in categories.keys()}
     for category in _iter_configured_editorial_categories(payload):
-        first_item = _select_editorial_category_item(categories.get(category), category=category, used_ids=set())
+        normalized_category = str(category).strip().lower()
+        if not normalized_category:
+            continue
+        mapped = normalized_available.get(normalized_category)
+        if mapped is None:
+            continue
+        first_item, _reason, _candidates = _select_editorial_category_item(
+            categories.get(mapped),
+            category=mapped,
+            used_ids=set(),
+        )
         if first_item is None:
             continue
         story_id = _news_identity(first_item)
