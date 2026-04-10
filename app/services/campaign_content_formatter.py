@@ -190,10 +190,8 @@ _NEWS_BAD_FALLBACKS = {
     "nessun riassunto disponibile",
     "nessun riassunto disponibile.",
 }
-_NEWS_MAX_SENTENCES = 2
 _NEWS_FIELD_HARD_LIMIT = 1024
 _NEWS_MAX_EDITORIAL_CATEGORIES = 3
-_NEWS_MAX_SUMMARY_BODY_CHARS = 260
 _ITALY_TZ = ZoneInfo("Europe/Rome")
 NEWS_EXTRA_ORDER = ["barzelletta", "aforisma", "canzone", "meme"]
 NEWS_EXTRA_FIELD_TITLES = {
@@ -209,23 +207,38 @@ NEWS_EXTRA_CATALOG = {
     "meme": ["Quando dici «chiudo in 5 minuti» e la breaking spunta al minuto 6."],
 }
 NEWS_DAYPART_COPY = {
-    "mattina": (
-        "Buon mattino: qui Barcellometro in regia, con la redazione già in corsa sulla ruota delle news. "
-        "Titoli freschi, zampette veloci e subito al punto. 📰"
-    ),
-    "pomeriggio": (
-        "Buon pomeriggio: qui Barcellometro in regia, con la redazione più rumorosa del quartiere. "
-        "Titoli caldi, pochi giri di parole e dritti al punto. 📰"
-    ),
-    "sera": (
-        "Buonasera: qui Barcellometro in regia, con la redazione e le notizie che si siedono sotto i riflettori. "
-        "Facciamo ordine nel caos e vediamo cosa merita davvero attenzione. 📰"
-    ),
-    "notte": (
-        "Buona notte: qui Barcellometro ancora sveglio in redazione, con gli ultimi fruscii dal mondo prima di spegnere le luci. "
-        "Due zampate rapide e il quadro è completo. 📰"
-    ),
+    "mattina": "mattino",
+    "pomeriggio": "pomeriggio",
+    "sera": "sera",
+    "notte": "sera",
 }
+_IMPORTANT_PLATFORM_TERMS = (
+    "Netflix",
+    "YouTube",
+    "Amazon",
+    "Prime Video",
+    "Disney+",
+    "Apple TV+",
+    "HBO",
+    "Sky",
+    "TikTok",
+    "Instagram",
+    "X",
+    "Facebook",
+    "Spotify",
+    "Twitch",
+)
+_IMPORTANT_PHRASES = (
+    "mix catastrofico",
+    "squali assassini",
+    "impatto devastante",
+    "svolta storica",
+    "crisi profonda",
+    "allarme rosso",
+    "colpo di scena",
+    "tensione alle stelle",
+    "record assoluto",
+)
 _NEWS_EMOJI_RE = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]",
     flags=re.UNICODE,
@@ -317,7 +330,7 @@ def _is_useless_news_text(text: str) -> bool:
     return not normalized or normalized in _NEWS_BAD_FALLBACKS
 
 
-def _take_news_sentences(text: str, *, max_sentences: int = _NEWS_MAX_SENTENCES) -> str:
+def _take_news_sentences(text: str, *, max_sentences: int = 99) -> str:
     candidate = sanitize_public_news_text(text)
     if not candidate:
         return ""
@@ -449,7 +462,8 @@ def _starts_with_bot_comment(text: str) -> bool:
 
 
 def _build_news_summary_body(raw_summary: str, *, item: dict[str, Any], display: str, tone: str) -> str:
-    cleaned = _take_news_sentences(raw_summary, max_sentences=2)
+    _ = (display, tone)
+    cleaned = _take_news_sentences(raw_summary, max_sentences=99)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
     cleaned = re.sub(r"^\s*[:\-–|]+\s*", "", cleaned).strip()
@@ -464,21 +478,10 @@ def _build_news_summary_body(raw_summary: str, *, item: dict[str, Any], display:
     source_hint = sanitize_public_news_text(str(item.get("summary") or ""))
     if source_hint and SequenceMatcher(None, cleaned.lower(), source_hint.lower()).ratio() >= 0.9:
         cleaned = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
-    cleaned = _take_news_sentences(cleaned, max_sentences=2)
+    cleaned = _take_news_sentences(cleaned, max_sentences=99)
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
-    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
-    if len(sentences) == 1:
-        extra = (
-            "Il contesto resta delicato e richiede aggiornamenti verificati."
-            if tone == "serious"
-            else "Il quadro resta in movimento e va seguito nei prossimi passaggi."
-        )
-        sentences.append(extra)
-    cleaned = " ".join(sentences[:2]).strip()
-    if len(cleaned) > _NEWS_MAX_SUMMARY_BODY_CHARS:
-        cleaned = _truncate_news_summary_safely(cleaned, max_chars=_NEWS_MAX_SUMMARY_BODY_CHARS)
-        cleaned = _take_news_sentences(cleaned, max_sentences=2)
+    cleaned = cleaned.strip()
     if not re.search(r"[.!?]\s*$", cleaned):
         cleaned = f"{cleaned}."
     return cleaned
@@ -520,37 +523,42 @@ def _normalize_news_summary_for_embed(
     return _compose_news_embed_summary(body, tail)
 
 
-def _truncate_news_summary_safely(text: str, *, max_chars: int) -> str:
+def highlight_key_terms(text: str) -> str:
     cleaned = sanitize_public_news_text(text)
-    if len(cleaned) <= max_chars:
+    if not cleaned:
+        return ""
+    highlights: list[tuple[int, int]] = []
+
+    def _add_span(start: int, end: int) -> None:
+        if start >= end:
+            return
+        for span_start, span_end in highlights:
+            if not (end <= span_start or start >= span_end):
+                return
+        highlights.append((start, end))
+
+    for platform in _IMPORTANT_PLATFORM_TERMS:
+        for match in re.finditer(rf"\b{re.escape(platform)}\b", cleaned):
+            _add_span(match.start(), match.end())
+
+    for phrase in _IMPORTANT_PHRASES:
+        for match in re.finditer(rf"\b{re.escape(phrase)}\b", cleaned, flags=re.IGNORECASE):
+            _add_span(match.start(), match.end())
+
+    for match in re.finditer(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", cleaned):
+        _add_span(match.start(), match.end())
+
+    highlights = sorted(highlights, key=lambda span: (span[0], -(span[1] - span[0])))[:4]
+    if not highlights:
         return cleaned
-    clipped = cleaned[:max_chars].rstrip()
-    cut = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
-    if cut >= int(max_chars * 0.6):
-        return clipped[: cut + 1].strip()
-    word_cut = clipped.rfind(" ")
-    if word_cut >= int(max_chars * 0.6):
-        return clipped[:word_cut].rstrip(" ,;:")
-    return clipped.rstrip(" ,;:")
-
-
-def _truncate_news_summary(summary: str, *, max_chars: int) -> str:
-    if len(summary) <= max_chars:
-        return summary
-    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", summary) if part.strip()]
-    if len(parts) <= 1:
-        return _truncate_news_summary_safely(summary, max_chars=max_chars)
-    tail = parts[-1]
-    body = " ".join(parts[:-1]).strip()
-    # Keep a minimum body chunk while preserving final bot comment.
-    min_reserved_for_tail = min(len(tail) + 1, max_chars - 20) if max_chars > 20 else 0
-    if min_reserved_for_tail > 0 and len(body) + 1 + len(tail) > max_chars:
-        allowed_body = max_chars - len(tail) - 1
-        body = _truncate_news_summary_safely(body, max_chars=max(20, allowed_body)).rstrip(".!?")
-    composed = _compose_news_embed_summary(body, tail)
-    if len(composed) <= max_chars:
-        return composed
-    return _truncate_news_summary_safely(composed, max_chars=max_chars)
+    rendered: list[str] = []
+    cursor = 0
+    for start, end in highlights:
+        rendered.append(cleaned[cursor:start])
+        rendered.append(f"**{cleaned[start:end]}**")
+        cursor = end
+    rendered.append(cleaned[cursor:])
+    return "".join(rendered)
 
 
 def _format_news_item_block(
@@ -559,27 +567,37 @@ def _format_news_item_block(
     display: str,
     numbered: bool,
     index: int,
-    max_summary_chars: int | None = None,
     used_tail_comments: set[str] | None = None,
     seed_key: str | None = None,
 ) -> str:
     link = str(item.get("link") or "").strip()
     title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))
     linked_title = f"[{title_line}]({link})" if link else title_line
-    summary = _build_news_item_summary(item, display=display, used_tail_comments=used_tail_comments, seed_key=seed_key)
-    if max_summary_chars is not None and max_summary_chars > 0:
-        original_len = len(summary)
-        summary = _truncate_news_summary(summary, max_chars=max_summary_chars)
-        if len(summary) < original_len:
-            logger.info(
-                "news_summary_truncated title=%s original_chars=%s final_chars=%s",
-                sanitize_plain_text(str(item.get("title") or ""))[:80],
-                original_len,
-                len(summary),
-            )
-    source_line = _news_source_line(item, link=link)
+    summary = highlight_key_terms(
+        _build_news_item_summary(item, display=display, used_tail_comments=used_tail_comments, seed_key=seed_key)
+    )
     heading = f"{index}. **{linked_title}**" if numbered else f"**{linked_title}**"
-    return f"{heading}\n• {summary}\n`fonte: {source_line}`"
+    source_line = _news_source_line(item, link=link)
+    return _fit_news_field_value(heading=heading, summary=summary, source_line=source_line)
+
+
+def _fit_news_field_value(*, heading: str, summary: str, source_line: str) -> str:
+    composed = f"{heading}\n• {summary}\n`fonte: {source_line}`"
+    if len(composed) <= _NEWS_FIELD_HARD_LIMIT:
+        return composed
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", summary) if part.strip()]
+    while len(sentences) > 1:
+        sentences.pop()
+        candidate_summary = " ".join(sentences).strip()
+        candidate = f"{heading}\n• {candidate_summary}\n`fonte: {source_line}`"
+        if len(candidate) <= _NEWS_FIELD_HARD_LIMIT:
+            return candidate
+    one_sentence = sentences[0] if sentences else summary
+    candidate = f"{heading}\n• {one_sentence}\n`fonte: {source_line}`"
+    if len(candidate) <= _NEWS_FIELD_HARD_LIMIT:
+        return candidate
+    # Extreme safeguard: preserve structure without cutting a sentence mid-stream.
+    return f"{heading}\n• Dettagli disponibili al link.\n`fonte: {source_line}`"
 
 
 def similarity_title(a: str, b: str) -> float:
@@ -694,27 +712,14 @@ def _build_single_news_field_value_with_tail_tracking(
     used_tail_comments: set[str] | None,
     seed_key: str | None,
 ) -> str:
-    for summary_limit in [280, 220, 170]:
-        value = _format_news_item_block(
-            item,
-            display=display,
-            numbered=False,
-            index=0,
-            max_summary_chars=summary_limit,
-            used_tail_comments=used_tail_comments,
-            seed_key=seed_key,
-        )
-        if len(value) <= _NEWS_FIELD_HARD_LIMIT:
-            return value
     return _format_news_item_block(
         item,
         display=display,
         numbered=False,
         index=0,
-        max_summary_chars=120,
         used_tail_comments=used_tail_comments,
         seed_key=seed_key,
-    )[:_NEWS_FIELD_HARD_LIMIT]
+    )
 
 
 def _iter_configured_editorial_categories(payload: dict[str, Any]) -> list[str]:
@@ -1132,9 +1137,13 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     now_utc = _overview_now(payload)
     edition_label, daypart = news_edition_label_for_datetime(now_utc)
     overview = discord.Embed(title=_format_news_title(f"HAMSTER NEWS • {edition_label}"), color=color)
-    intro = NEWS_DAYPART_COPY.get(daypart, NEWS_DAYPART_COPY["pomeriggio"])
+    time_of_day = NEWS_DAYPART_COPY.get(daypart, NEWS_DAYPART_COPY["pomeriggio"])
     overview.description = format_standard_description(
-        f"{intro}\n**Che ci racconta il mondo oggi?**",
+        (
+            f"Buon {time_of_day}: qui Barcellometro in regia 🐹, con la redazione più rumorosa del quartiere. "
+            "Titoli caldi, pochi giri di parole e dritti al punto. 📰\n"
+            "Che ci racconta il mondo oggi?"
+        ),
         blank_line_before_fields=True,
     )
     selected_slots = payload.get("selected_news_slots")

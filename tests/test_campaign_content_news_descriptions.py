@@ -29,9 +29,10 @@ def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -
     )
     description = embeds[0].description or ""
     normalized = description.lstrip("*")
-    assert normalized.startswith("Buonasera")
+    assert normalized.startswith("Buon sera")
+    assert "in regia 🐹" in description
     assert "📰" in description
-    assert "**Che ci racconta il mondo oggi?**" in description
+    assert "Che ci racconta il mondo oggi?" in description
 
 
 def test_ultimora_and_in_evidenza_share_summary_pipeline_with_tail_comment_at_end() -> None:
@@ -66,7 +67,7 @@ def test_ultimora_and_in_evidenza_share_summary_pipeline_with_tail_comment_at_en
         summary_text = summary_line.removeprefix("• ").strip()
         assert not summary_text.startswith(("👀", "😵‍💫", "🤖", "😔", "🫥", "🐹", "🤹"))
         assert not summary_line.lower().startswith(("• qui la faccenda", "• in pratica", "• attenzione"))
-        assert _sentence_count(summary_text) == 3
+        assert _sentence_count(summary_text) >= 2
         assert any(summary_text.endswith(tail) for tail in ("👀", "🐹", "🤹", "🫥", "😔"))
 
 

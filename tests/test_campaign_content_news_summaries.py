@@ -6,7 +6,7 @@ from app.services.campaign_content_formatter import (
     _classify_news_tone,
     _compose_news_embed_summary,
     _normalize_news_summary_for_embed,
-    _truncate_news_summary,
+    highlight_key_terms,
 )
 
 
@@ -41,13 +41,12 @@ def test_news_summary_tone_serious_uses_sober_tail() -> None:
     assert summary.endswith(("🫥", "😔"))
 
 
-def test_news_body_builder_keeps_only_two_sentences_and_no_emoji() -> None:
+def test_news_body_builder_preserves_full_body_and_no_emoji() -> None:
     item = {"title": "Tech", "summary": "ok", "source": "wired.it", "link": "https://example.com/tech"}
     body = _build_news_summary_body(
         "Prima frase utile. Seconda frase utile. Terza frase da togliere.", item=item, display="Tecnologia", tone="standard"
     )
-    assert _sentence_count(body) == 2
-    assert "Terza frase" not in body
+    assert "Terza frase" in body
     assert all(emoji not in body for emoji in ("👀", "🐹", "🤹", "🫥", "😔"))
 
 
@@ -56,16 +55,17 @@ def test_news_compose_adds_tail_when_missing_from_ai_body() -> None:
     assert composed == "Prima frase. Seconda frase. Qui la ruota gira veloce 👀"
 
 
-def test_news_truncate_keeps_tail_and_avoids_broken_word() -> None:
-    summary = (
-        "Prima frase molto lunga con tanti dettagli operativi e contesto istituzionale. "
-        "Seconda frase ancora più lunga per stressare il limite massimo del campo descrittivo. "
-        "Tema che farà discutere ancora un bel po’ 🤹"
+def test_highlight_key_terms_adds_bold_without_over_formatting() -> None:
+    text = (
+        "Thrash-Furia dall'oceano su Netflix è un mix catastrofico con squali assassini, "
+        "diretta da Tommy Wirkola e rilanciata su YouTube."
     )
-    truncated = _truncate_news_summary(summary, max_chars=120)
-    assert truncated.endswith("🤹")
-    assert not truncated.endswith((" ", "...", "..", "…"))
-    assert len(truncated) <= 120
+    highlighted = highlight_key_terms(text)
+    assert "**Netflix**" in highlighted
+    assert "**mix catastrofico**" in highlighted
+    assert "**squali assassini**" in highlighted
+    assert "**Tommy Wirkola**" in highlighted
+    assert highlighted.count("**") <= 8
 
 
 def test_news_fallback_pipeline_stays_structured_when_ai_body_missing() -> None:
