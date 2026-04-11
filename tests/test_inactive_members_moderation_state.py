@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
+from unittest.mock import patch
 
 if "aiosqlite" not in sys.modules:
     sys.modules["aiosqlite"] = types.SimpleNamespace(Row=dict)
@@ -658,10 +659,20 @@ def test_execute_reminders_publishes_inactive_grace_notification_when_canonical_
 
 def test_handle_post_activity_report_auto_runs_kick_before_reminders() -> None:
     async def _run() -> None:
+        member = SimpleNamespace(id=42, mention="<@42>", display_name="Dormiente")
+        candidate = InactiveCandidate(
+            member=member,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=40,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
         send_mock = AsyncMock()
         service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
         service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 7})
-        service.scan_inactive_members = AsyncMock(return_value=([], 0, {"enabled": True}))
+        service.scan_inactive_members = AsyncMock(return_value=([candidate], 1, {"enabled": True}))
         service.post_manual_panel = AsyncMock()
         order: list[str] = []
 
@@ -676,12 +687,10 @@ def test_handle_post_activity_report_auto_runs_kick_before_reminders() -> None:
         service.execute_kick_pipeline = AsyncMock(side_effect=_kick)
         service.execute_reminders = AsyncMock(side_effect=_reminders)
         service.build_auto_inactive_completed_embed = Mock(return_value=SimpleNamespace())
-        service._bot = SimpleNamespace(
-            get_guild=lambda guild_id: SimpleNamespace(id=guild_id),
-            get_channel=lambda channel_id: SimpleNamespace(send=send_mock),
-        )
+        service._bot = SimpleNamespace(get_guild=lambda guild_id: SimpleNamespace(id=guild_id), get_channel=lambda channel_id: SimpleNamespace(send=send_mock))
 
-        await service.handle_post_activity_report("1", "2")
+        with patch("app.services.inactive_members_moderation.discord.abc.Messageable", object):
+            await service.handle_post_activity_report("1", "2")
 
         assert order == ["kick:True", "reminders"]
         send_mock.assert_awaited_once()
