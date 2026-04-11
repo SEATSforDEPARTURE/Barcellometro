@@ -574,3 +574,116 @@ def test_build_action_embed_moves_main_content_to_dedicated_details_field() -> N
     detail_field = next(field for field in embed.fields if field.name == format_standard_field_name("DETTAGLI", emoji="📌"))
     assert "• DM success/fail: **2/1**" in detail_field.value
     assert "• Errori: timeout" in detail_field.value
+
+
+def test_execute_reminders_skips_already_graced_members_and_does_not_reset_timer() -> None:
+    async def _run() -> None:
+        member = SimpleNamespace(id=42, mention="<@42>", display_name="Dormiente", send=AsyncMock())
+        candidate = InactiveCandidate(
+            member=member,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=40,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace(
+            get_inactivity_user_state=AsyncMock(return_value={"last_reminder_at": (datetime.now(timezone.utc) - timedelta(days=9)).isoformat()}),
+            mark_user_reminded=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        service.scan_inactive_members = AsyncMock(
+            return_value=(
+                [candidate],
+                1,
+                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7},
+            )
+        )
+
+        result = await service.execute_reminders("1")
+
+        assert result["dm_ok"] == 0
+        assert result["dm_skipped"] == 1
+        member.send.assert_not_awaited()
+        database.mark_user_reminded.assert_not_awaited()
+        database.log_inactivity_dm_delivery.assert_awaited_once()
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["error_summary"] == "already_in_grace"
+
+    asyncio.run(_run())
+
+
+def test_execute_reminders_publishes_inactive_grace_notification_when_canonical_visible() -> None:
+    async def _run() -> None:
+        member = SimpleNamespace(id=42, mention="<@42>", display_name="Dormiente", send=AsyncMock())
+        candidate = InactiveCandidate(
+            member=member,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=40,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace(
+            get_inactivity_user_state=AsyncMock(return_value=None),
+            mark_user_reminded=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
+        )
+        member_flow_notifications = SimpleNamespace(
+            log_action=AsyncMock(return_value={"canonical_written": True, "canonical_visible": True, "canonical_event": {"event_type_key": "inactive_grace"}}),
+            send_notification=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=member_flow_notifications)
+        service.scan_inactive_members = AsyncMock(
+            return_value=(
+                [candidate],
+                1,
+                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7},
+            )
+        )
+
+        result = await service.execute_reminders("1")
+
+        assert result["dm_ok"] == 1
+        member_flow_notifications.log_action.assert_awaited_once()
+        member_flow_notifications.send_notification.assert_awaited_once()
+        assert member_flow_notifications.send_notification.await_args.kwargs["action_type"] == "inactive_grace"
+
+    asyncio.run(_run())
+
+
+def test_handle_post_activity_report_auto_runs_kick_before_reminders() -> None:
+    async def _run() -> None:
+        send_mock = AsyncMock()
+        service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 7})
+        service.scan_inactive_members = AsyncMock(return_value=([], 0, {"enabled": True}))
+        service.post_manual_panel = AsyncMock()
+        order: list[str] = []
+
+        async def _kick(_guild_id: str, *, require_grace: bool):
+            order.append(f"kick:{require_grace}")
+            return {"kick_ok": 1}
+
+        async def _reminders(_guild_id: str):
+            order.append("reminders")
+            return {"dm_ok": 1}
+
+        service.execute_kick_pipeline = AsyncMock(side_effect=_kick)
+        service.execute_reminders = AsyncMock(side_effect=_reminders)
+        service.build_auto_inactive_completed_embed = Mock(return_value=SimpleNamespace())
+        service._bot = SimpleNamespace(
+            get_guild=lambda guild_id: SimpleNamespace(id=guild_id),
+            get_channel=lambda channel_id: SimpleNamespace(send=send_mock),
+        )
+
+        await service.handle_post_activity_report("1", "2")
+
+        assert order == ["kick:True", "reminders"]
+        send_mock.assert_awaited_once()
+
+    asyncio.run(_run())
