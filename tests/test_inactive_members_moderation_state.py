@@ -16,6 +16,10 @@ if "discord" not in sys.modules:
     discord_stub = types.ModuleType("discord")
     class _FakeColour:
         @staticmethod
+        def blue():
+            return 0x3498DB
+
+        @staticmethod
         def blurple():
             return 0x5865F2
 
@@ -268,6 +272,70 @@ def test_execute_reminders_respects_dm_toggle_and_skips_sending() -> None:
         assert result["disabled"] is True
         database.mark_user_reminded.assert_not_awaited()
         database.log_inactivity_dm_delivery.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_execute_reminders_skips_members_already_role_regressed() -> None:
+    async def _run() -> None:
+        member = SimpleNamespace(id=42, mention="<@42>", display_name="Dormiente", send=AsyncMock())
+        candidate = InactiveCandidate(
+            member=member,
+            last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            last_channel_id=None,
+            last_message_id=None,
+            count_in_window=0,
+            days_inactive=40,
+            policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+        )
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace(
+            get_inactivity_user_state=AsyncMock(return_value=None),
+            mark_user_reminded=AsyncMock(),
+            log_inactivity_dm_delivery=AsyncMock(),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        service.execute_role_regress = AsyncMock(return_value={"processed_user_ids": {42}, "applied": 1, "failed": 0, "skipped": 0})
+        service.scan_inactive_members = AsyncMock(
+            return_value=(
+                [candidate],
+                1,
+                {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7, "template_grace": "Grace {mention} ({user})"},
+            )
+        )
+
+        result = await service.execute_reminders("1")
+
+        assert result["dm_ok"] == 0
+        assert result["role_regress"]["applied"] == 1
+        member.send.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_apply_role_regress_removes_old_role_and_adds_new_role() -> None:
+    async def _run() -> None:
+        old_role = SimpleNamespace(id=10, name="CRICETINE")
+        new_role = SimpleNamespace(id=11, name="POLLE")
+        member = SimpleNamespace(id=42, roles=[old_role], edit=AsyncMock(), mention="<@42>")
+        guild = SimpleNamespace(
+            id=1,
+            get_role=lambda role_id: old_role if role_id == 10 else new_role if role_id == 11 else None,
+        )
+        service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        ok, error = await service.apply_role_regress(
+            guild,
+            member,
+            {"role_to_regress": "10", "role_after_regress": "11"},
+            days_inactive=8,
+            message_count=0,
+        )
+
+        assert ok is True
+        assert error is None
+        edited_roles = member.edit.await_args.kwargs["roles"]
+        assert old_role not in edited_roles
+        assert new_role in edited_roles
 
     asyncio.run(_run())
 

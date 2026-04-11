@@ -504,6 +504,169 @@ class InactiveMembersModerationService:
                 selected = (priority, policy)
         return selected[1] if selected else dict(default_policy)
 
+    async def _list_role_regress_policies(self, guild_id: str) -> list[dict[str, Any]]:
+        rows = await self._database.list_inactivity_role_regress_policies(guild_id)
+        policies: list[dict[str, Any]] = []
+        for row in rows:
+            policy = self._parse_policy_json(row["policy_json"])
+            policy["role_to_regress"] = str(row["role_to_regress"])
+            policy["role_after_regress"] = str(row["role_after_regress"])
+            policies.append(policy)
+        return policies
+
+    def get_applicable_role_regress_policy(
+        self, member: discord.Member, cfg: dict[str, Any], role_regress_policies: list[dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        if int(cfg.get("role_regress_enabled", 0) or 0) <= 0:
+            return None
+        excluded_roles = cfg.get("excluded_role_ids") or set()
+        member_role_ids = {r.id for r in member.roles}
+        if excluded_roles.intersection(member_role_ids):
+            logger.debug("inactive role regress: member skipped by exception role user=%s", member.id)
+            return None
+        matched: list[dict[str, Any]] = [p for p in role_regress_policies if int(p["role_to_regress"]) in member_role_ids]
+        if not matched:
+            return None
+        return max(matched, key=lambda policy: next((getattr(r, "position", 0) for r in member.roles if str(r.id) == str(policy["role_to_regress"])), -1))
+
+    async def member_violates_role_regress_policy(
+        self,
+        guild_id: str,
+        member: discord.Member,
+        policy: dict[str, Any],
+        *,
+        now: datetime,
+        last_map: dict[int, dict[str, Any]],
+        count_cache: dict[int, dict[int, int]],
+    ) -> tuple[bool, int, int]:
+        min_age = int(policy.get("min_account_age_days", 0))
+        if min_age > 0:
+            created_at = member.created_at if member.created_at.tzinfo else member.created_at.replace(tzinfo=timezone.utc)
+            if (now - created_at).days < min_age:
+                return False, 0, 0
+        last_info = last_map.get(member.id) or {}
+        last_ts = last_info.get("ts")
+        if last_ts:
+            try:
+                last_dt = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
+                days = max(0, int((now - last_dt).total_seconds() // 86400))
+            except Exception:
+                days = 9999
+        else:
+            days = 9999
+        win_days = int(policy.get("window_days", 30))
+        if win_days not in count_cache:
+            member_window_start = (now - timedelta(days=win_days)).isoformat()
+            count_cache[win_days] = await self._database.fetch_message_counts_by_user_since(guild_id, member_window_start)
+        count = int(count_cache[win_days].get(member.id, 0))
+        return self._is_inactive(days_inactive=days, count_in_window=count, policy=policy), days, count
+
+    async def apply_role_regress(
+        self, guild: discord.Guild, member: discord.Member, policy: dict[str, Any], *, days_inactive: int, message_count: int
+    ) -> tuple[bool, str | None]:
+        from_role = guild.get_role(int(policy["role_to_regress"]))
+        to_role = guild.get_role(int(policy["role_after_regress"]))
+        if from_role is None or to_role is None:
+            return False, "missing_role"
+        roles_after = [r for r in member.roles if r.id != from_role.id]
+        if all(r.id != to_role.id for r in roles_after):
+            roles_after.append(to_role)
+        try:
+            await member.edit(
+                roles=roles_after,
+                reason=f"Inactivity role regress: {from_role.name} -> {to_role.name}",
+            )
+        except Exception as exc:
+            logger.warning(
+                "inactive role regress failed guild=%s user=%s from=%s to=%s",
+                guild.id,
+                member.id,
+                from_role.id,
+                to_role.id,
+                exc_info=True,
+            )
+            return False, exc.__class__.__name__
+        logger.info(
+            "inactive role regress applied guild=%s user=%s from=%s to=%s",
+            guild.id,
+            member.id,
+            from_role.id,
+            to_role.id,
+        )
+        if self._member_flow_notifications is not None:
+            result = await self._member_flow_notifications.log_action(
+                guild_id=str(guild.id),
+                user_id=str(member.id),
+                moderator_id=None,
+                action_type="inactive_role_regress",
+                reason=f"Inattività: {from_role.name} → {to_role.name}",
+                metadata={
+                    "source": "inactive_members_moderation",
+                    "from_role_id": str(from_role.id),
+                    "to_role_id": str(to_role.id),
+                    "days_inactive": days_inactive,
+                    "message_count": message_count,
+                },
+            )
+            if result.get("canonical_written") and result.get("canonical_visible"):
+                await self._member_flow_notifications.send_notification(
+                    guild=guild,
+                    user=member,
+                    action_type="inactive_role_regress",
+                    reason=f"Inattività: {from_role.name} → {to_role.name}",
+                    metadata={
+                        "source": "inactive_members_moderation",
+                        "from_role_id": str(from_role.id),
+                        "to_role_id": str(to_role.id),
+                        "days_inactive": days_inactive,
+                        "message_count": message_count,
+                    },
+                    canonical_event=result.get("canonical_event"),
+                )
+        return True, None
+
+    async def execute_role_regress(self, guild_id: str) -> dict[str, Any]:
+        if getattr(self._database, "get_inactivity_config", None) is None or getattr(self._database, "list_inactivity_role_regress_policies", None) is None:
+            return {"applied": 0, "failed": 0, "skipped": 0, "processed_user_ids": set()}
+        guild = self._bot.get_guild(int(guild_id))
+        if guild is None:
+            return {"applied": 0, "failed": 0, "skipped": 0, "processed_user_ids": set()}
+        cfg = await self._get_config(guild_id)
+        if not cfg:
+            return {"applied": 0, "failed": 0, "skipped": 0, "processed_user_ids": set()}
+        policies = await self._list_role_regress_policies(guild_id)
+        if not policies or int(cfg.get("role_regress_enabled", 0) or 0) <= 0:
+            return {"applied": 0, "failed": 0, "skipped": 0, "processed_user_ids": set()}
+        now = datetime.now(timezone.utc)
+        last_map = await self._database.fetch_last_message_info_by_user_guild(guild_id)
+        count_cache: dict[int, dict[int, int]] = {}
+        processed_user_ids: set[int] = set()
+        stats = {"applied": 0, "failed": 0, "skipped": 0, "processed_user_ids": processed_user_ids}
+        for member in guild.members:
+            if member.bot:
+                continue
+            policy = self.get_applicable_role_regress_policy(member, cfg, policies)
+            if policy is None:
+                continue
+            violates, days, count = await self.member_violates_role_regress_policy(
+                guild_id,
+                member,
+                policy,
+                now=now,
+                last_map=last_map,
+                count_cache=count_cache,
+            )
+            if not violates:
+                stats["skipped"] += 1
+                continue
+            ok, _ = await self.apply_role_regress(guild, member, policy, days_inactive=days, message_count=count)
+            if ok:
+                processed_user_ids.add(member.id)
+                stats["applied"] += 1
+            else:
+                stats["failed"] += 1
+        return stats
+
     def _is_inactive(self, *, days_inactive: int, count_in_window: int, policy: dict[str, Any]) -> bool:
         cond_days = days_inactive >= int(policy.get("inactive_days", 30))
         cond_msgs = count_in_window < int(policy.get("min_messages", 1))
@@ -1018,10 +1181,12 @@ class InactiveMembersModerationService:
         return latest_grace if grace_sent_at >= legacy_sent_at else latest_legacy
 
     async def execute_reminders(self, guild_id: str) -> dict[str, Any]:
+        role_regress_stats = await self.execute_role_regress(guild_id)
         inactive, _, cfg = await self.scan_inactive_members(guild_id)
         guild = self._bot.get_guild(int(guild_id))
         if guild is None or not cfg:
             return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": []}
+        inactive = [candidate for candidate in inactive if candidate.member.id not in role_regress_stats["processed_user_ids"]]
         if int(cfg.get("dm_reminders_enabled", 1) or 0) <= 0:
             logger.info("inactive reminders disabled for guild=%s", guild_id)
             return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": [], "disabled": True}
@@ -1180,13 +1345,15 @@ class InactiveMembersModerationService:
                         },
                     )
         logger.info("inactive reminders guild=%s ok=%s fail=%s", guild_id, ok, fail)
-        return {"dm_ok": ok, "dm_fail": fail, "dm_skipped": skipped, "errors": errors[:10]}
+        return {"dm_ok": ok, "dm_fail": fail, "dm_skipped": skipped, "errors": errors[:10], "role_regress": role_regress_stats}
 
     async def execute_kick_pipeline(self, guild_id: str, *, require_grace: bool) -> dict[str, Any]:
+        role_regress_stats = await self.execute_role_regress(guild_id)
         inactive, _, cfg = await self.scan_inactive_members(guild_id)
         guild = self._bot.get_guild(int(guild_id))
         if guild is None or not cfg:
             return {"kick_ok": 0, "kick_fail": 0, "ban_ok": 0, "ban_fail": 0, "dm_ok": 0, "dm_fail": 0, "notify_ok": 0, "errors": []}
+        inactive = [candidate for candidate in inactive if candidate.member.id not in role_regress_stats["processed_user_ids"]]
         now = datetime.now(timezone.utc)
         grace_days = int(cfg.get("grace_days_after_reminder", 7))
         ban_days = int(cfg.get("ban_days", 7))
@@ -1409,6 +1576,7 @@ class InactiveMembersModerationService:
             stats["ban_ok"],
         )
         stats["errors"] = stats["errors"][:10]
+        stats["role_regress"] = role_regress_stats
         return stats
 
     def build_auto_inactive_completed_embed(self, reminder_stats: dict[str, Any], kick_stats: dict[str, Any]) -> discord.Embed:

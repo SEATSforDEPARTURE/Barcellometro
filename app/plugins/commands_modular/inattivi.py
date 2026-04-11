@@ -181,11 +181,13 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
     tempban_group = app_commands.Group(name="tempban", description="Temporary ban settings")
     dms_group = app_commands.Group(name="dms", description="Direct message settings")
     policy_group = app_commands.Group(name="policy", description="Inactivity policy settings")
+    roleregress_group = app_commands.Group(name="roleregress", description="Role regress settings")
     inactivity_group.add_command(autokick_group)
     inactivity_group.add_command(grace_group)
     inactivity_group.add_command(tempban_group)
     inactivity_group.add_command(dms_group)
     inactivity_group.add_command(policy_group)
+    inactivity_group.add_command(roleregress_group)
 
     async def _ensure(interaction: discord.Interaction) -> bool:
         return await check_permission(interaction, PERM, ctx)
@@ -777,3 +779,106 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             str(interaction.channel_id),
         )
         await _send(interaction, subcommand_path="inactivity run", lines=[("result", "completed")], kind="success")
+
+    @roleregress_group.command(name="on", description="Enable inactivity role regress.")
+    async def inactivity_roleregress_on(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_inactivity_role_regress_enabled(str(interaction.guild_id), True)
+        await _send(interaction, subcommand_path="inactivity roleregress on", lines=[("result", "enabled")], kind="success")
+
+    @roleregress_group.command(name="off", description="Disable inactivity role regress.")
+    async def inactivity_roleregress_off(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.set_inactivity_role_regress_enabled(str(interaction.guild_id), False)
+        await _send(interaction, subcommand_path="inactivity roleregress off", lines=[("result", "disabled")], kind="success")
+
+    @roleregress_group.command(name="status", description="Show inactivity role regress status.")
+    async def inactivity_roleregress_status(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
+        rows = await ctx.database.list_inactivity_role_regress_policies(str(interaction.guild_id))
+        await _send(
+            interaction,
+            subcommand_path="inactivity roleregress status",
+            lines=[
+                ("enabled", _bool_label(cfg.get("role_regress_enabled"))),
+                ("policies", len(rows)),
+            ],
+        )
+
+    @roleregress_group.command(name="policy_set", description="Set a role regress inactivity policy.")
+    async def inactivity_roleregress_policy_set(
+        interaction: discord.Interaction,
+        role_to_regress: discord.Role,
+        role_after_regress: discord.Role,
+        inactive_days: app_commands.Range[int, 1, 3650],
+        window_days: app_commands.Range[int, 1, 3650],
+        min_messages: app_commands.Range[int, 0, 100000],
+        mode: str,
+        min_account_age_days: app_commands.Range[int, 0, 3650] = 0,
+    ) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        if role_to_regress.id == role_after_regress.id:
+            await _send(interaction, subcommand_path="inactivity roleregress policy_set", lines=[("error", "role_to_regress and role_after_regress must be different.")], kind="error")
+            return
+        try:
+            payload = _policy_payload(inactive_days, window_days, min_messages, mode, min_account_age_days)
+        except ValueError as exc:
+            await _send(interaction, subcommand_path="inactivity roleregress policy_set", lines=[("error", str(exc))], kind="error")
+            return
+        await ctx.database.upsert_inactivity_role_regress_policy(
+            str(interaction.guild_id),
+            str(role_to_regress.id),
+            str(role_after_regress.id),
+            payload,
+        )
+        await _send(
+            interaction,
+            subcommand_path="inactivity roleregress policy_set",
+            lines=[
+                ("role_to_regress", role_to_regress.mention),
+                ("role_after_regress", role_after_regress.mention),
+                ("policy", _policy_summary(_policy_dict(payload))),
+                ("result", "updated"),
+            ],
+            kind="success",
+        )
+
+    @roleregress_group.command(name="policy_show", description="Show configured role regress inactivity policies.")
+    async def inactivity_roleregress_policy_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None or interaction.guild is None:
+            return
+        rows = await ctx.database.list_inactivity_role_regress_policies(str(interaction.guild_id))
+        if not rows:
+            await _send(interaction, subcommand_path="inactivity roleregress policy_show", lines=[("policies", "none")], kind="warning")
+            return
+        lines: list[str] = []
+        for row in rows:
+            policy = _policy_dict(str(row.get("policy_json") or ""))
+            before_role = interaction.guild.get_role(int(row["role_to_regress"])) if str(row["role_to_regress"]).isdigit() else None
+            after_role = interaction.guild.get_role(int(row["role_after_regress"])) if str(row["role_after_regress"]).isdigit() else None
+            lines.append(
+                f"• {before_role.mention if before_role else row['role_to_regress']} -> {after_role.mention if after_role else row['role_after_regress']} | {_policy_summary(policy)}"
+            )
+        await _send_lines_with_txt(
+            interaction,
+            subcommand_path="inactivity roleregress policy_show",
+            title="Role regress policies",
+            lines=lines,
+            txt_prefix="inactivity_roleregress_policies",
+        )
+
+    @roleregress_group.command(name="policy_reset", description="Reset role regress inactivity policy(s).")
+    async def inactivity_roleregress_policy_reset(interaction: discord.Interaction, role_to_regress: discord.Role | None = None) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        if role_to_regress is None:
+            await ctx.database.delete_all_inactivity_role_regress_policies(str(interaction.guild_id))
+            await _send(interaction, subcommand_path="inactivity roleregress policy_reset", lines=[("result", "all_policies_reset")], kind="success")
+            return
+        await ctx.database.delete_inactivity_role_regress_policy(str(interaction.guild_id), str(role_to_regress.id))
+        await _send(interaction, subcommand_path="inactivity roleregress policy_reset", lines=[("role_to_regress", role_to_regress.mention), ("result", "reset")], kind="success")

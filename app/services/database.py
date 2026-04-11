@@ -32,6 +32,7 @@ _MEMBER_FLOW_EVENT_TYPES = (
     "inactive_kick",
     "inactive_tempban",
     "inactive_grace",
+    "inactive_role_regress",
 )
 _MEMBER_FLOW_VISIBLE_DEPARTURE_TYPES = (
     "leave",
@@ -733,6 +734,7 @@ class DatabaseService:
                 template_ban_reason TEXT NULL,
                 template_tempban_reason TEXT NULL,
                 template_grace_reason TEXT NULL,
+                role_regress_enabled INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
@@ -743,6 +745,14 @@ class DatabaseService:
                 priority INTEGER NOT NULL DEFAULT 0,
                 policy_json TEXT NOT NULL,
                 PRIMARY KEY (guild_id, role_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS inactivity_role_regress_policies (
+                guild_id TEXT NOT NULL,
+                role_to_regress TEXT NOT NULL,
+                role_after_regress TEXT NOT NULL,
+                policy_json TEXT NOT NULL,
+                PRIMARY KEY (guild_id, role_to_regress)
             );
 
             CREATE TABLE IF NOT EXISTS inactivity_user_state (
@@ -871,7 +881,8 @@ class DatabaseService:
                         'grace',
                         'inactive_kick',
                         'inactive_tempban',
-                        'inactive_grace'
+                        'inactive_grace',
+                        'inactive_role_regress'
                     )
                 ),
                 occurred_at TEXT NOT NULL,
@@ -1028,6 +1039,7 @@ class DatabaseService:
             "template_tempban_embed_color": "TEXT NULL",
             "reminder_cooldown_seconds": "INTEGER NOT NULL DEFAULT 1209600",
             "check_interval_minutes": "INTEGER NOT NULL DEFAULT 60",
+            "role_regress_enabled": "INTEGER NOT NULL DEFAULT 0",
         }
         for name, col_def in missing.items():
             if name not in existing:
@@ -1215,7 +1227,7 @@ class DatabaseService:
         if table_row is None:
             return
         create_sql = str(table_row["sql"] or "")
-        if "'unban'" in create_sql:
+        if "'unban'" in create_sql and "'inactive_role_regress'" in create_sql:
             return
 
         await self._conn.executescript(
@@ -1235,7 +1247,8 @@ class DatabaseService:
                         'grace',
                         'inactive_kick',
                         'inactive_tempban',
-                        'inactive_grace'
+                        'inactive_grace',
+                        'inactive_role_regress'
                     )
                 ),
                 occurred_at TEXT NOT NULL,
@@ -5494,6 +5507,7 @@ class DatabaseService:
             "template_ban_reason": None,
             "template_tempban_reason": None,
             "template_grace_reason": None,
+            "role_regress_enabled": 0,
             "created_at": now,
             "updated_at": now,
         }
@@ -5530,6 +5544,7 @@ class DatabaseService:
             "template_ban_reason",
             "template_tempban_reason",
             "template_grace_reason",
+            "role_regress_enabled",
             "updated_at",
             "created_at",
         ]
@@ -5555,6 +5570,9 @@ class DatabaseService:
 
     async def set_inactivity_dm_reminders_enabled(self, guild_id: str, enabled: bool) -> None:
         await self.upsert_inactivity_config(guild_id, dm_reminders_enabled=1 if enabled else 0)
+
+    async def set_inactivity_role_regress_enabled(self, guild_id: str, enabled: bool) -> None:
+        await self.upsert_inactivity_config(guild_id, role_regress_enabled=1 if enabled else 0)
 
     async def log_inactivity_dm_delivery(
         self,
@@ -5859,6 +5877,44 @@ class DatabaseService:
     async def list_inactivity_role_policies(self, guild_id: str) -> list[aiosqlite.Row]:
         return await self.fetchall(
             "SELECT guild_id, role_id, priority, policy_json FROM inactivity_role_policies WHERE guild_id = ? ORDER BY priority DESC, role_id ASC",
+            (guild_id,),
+        )
+
+    async def upsert_inactivity_role_regress_policy(
+        self,
+        guild_id: str,
+        role_to_regress: str,
+        role_after_regress: str,
+        policy_json: str,
+    ) -> None:
+        await self.execute(
+            """
+            INSERT INTO inactivity_role_regress_policies (guild_id, role_to_regress, role_after_regress, policy_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(guild_id, role_to_regress) DO UPDATE SET
+                role_after_regress = excluded.role_after_regress,
+                policy_json = excluded.policy_json
+            """,
+            (guild_id, role_to_regress, role_after_regress, policy_json),
+        )
+
+    async def delete_inactivity_role_regress_policy(self, guild_id: str, role_to_regress: str) -> None:
+        await self.execute(
+            "DELETE FROM inactivity_role_regress_policies WHERE guild_id = ? AND role_to_regress = ?",
+            (guild_id, role_to_regress),
+        )
+
+    async def delete_all_inactivity_role_regress_policies(self, guild_id: str) -> None:
+        await self.execute("DELETE FROM inactivity_role_regress_policies WHERE guild_id = ?", (guild_id,))
+
+    async def list_inactivity_role_regress_policies(self, guild_id: str) -> list[aiosqlite.Row]:
+        return await self.fetchall(
+            """
+            SELECT guild_id, role_to_regress, role_after_regress, policy_json
+            FROM inactivity_role_regress_policies
+            WHERE guild_id = ?
+            ORDER BY role_to_regress ASC
+            """,
             (guild_id,),
         )
 

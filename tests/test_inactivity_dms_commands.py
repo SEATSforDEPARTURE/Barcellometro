@@ -25,6 +25,7 @@ class _FakeDatabase:
             "template_grace_embed_color": None,
             "template_tempban_embed_color": None,
             "check_interval_minutes": 60,
+            "role_regress_enabled": 0,
         }
         self.set_dm_enabled_calls: list[tuple[str, bool]] = []
         self.stats_payload = {
@@ -46,6 +47,7 @@ class _FakeDatabase:
                 "error_summary": None,
             }
         ]
+        self.role_regress_policies: list[dict[str, object]] = []
 
     async def get_inactivity_config(self, guild_id: str):
         _ = guild_id
@@ -71,6 +73,35 @@ class _FakeDatabase:
     async def list_inactivity_role_policies(self, guild_id: str):
         _ = guild_id
         return []
+
+    async def set_inactivity_role_regress_enabled(self, guild_id: str, enabled: bool) -> None:
+        _ = guild_id
+        self.config["role_regress_enabled"] = 1 if enabled else 0
+
+    async def list_inactivity_role_regress_policies(self, guild_id: str):
+        _ = guild_id
+        return self.role_regress_policies
+
+    async def upsert_inactivity_role_regress_policy(self, guild_id: str, role_to_regress: str, role_after_regress: str, policy_json: str) -> None:
+        _ = guild_id
+        filtered = [row for row in self.role_regress_policies if row["role_to_regress"] != role_to_regress]
+        filtered.append(
+            {
+                "guild_id": guild_id,
+                "role_to_regress": role_to_regress,
+                "role_after_regress": role_after_regress,
+                "policy_json": policy_json,
+            }
+        )
+        self.role_regress_policies = filtered
+
+    async def delete_all_inactivity_role_regress_policies(self, guild_id: str) -> None:
+        _ = guild_id
+        self.role_regress_policies = []
+
+    async def delete_inactivity_role_regress_policy(self, guild_id: str, role_to_regress: str) -> None:
+        _ = guild_id
+        self.role_regress_policies = [row for row in self.role_regress_policies if row["role_to_regress"] != role_to_regress]
 
 
 @pytest.fixture
@@ -280,6 +311,35 @@ def test_inactivity_policy_default_set_check_interval_validation(inattivi_module
         await callback(interaction, 30, 30, 1, "OR", 0, 1441)
         assert send_response.await_args.kwargs["kind"] == "error"
         assert db.config["check_interval_minutes"] == 60
+
+    asyncio.run(_run())
+
+
+def test_inactivity_roleregress_commands_on_off_status_and_policy_set(inattivi_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        send_response = AsyncMock()
+        monkeypatch.setattr(inattivi_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(inattivi_module, "send_standard_response", send_response)
+
+        ctx = SimpleNamespace(database=db, footer=None, author=None)
+        inactivity_group = discord.app_commands.Group(name="inactivity", description="inactivity")
+        inattivi_module.register_inattivi(inactivity_group, ctx)
+
+        role_a = SimpleNamespace(id=101, mention="<@&101>")
+        role_b = SimpleNamespace(id=102, mention="<@&102>")
+        interaction = SimpleNamespace(guild_id=123, guild=SimpleNamespace(get_role=lambda role_id: None))
+        await _find_command(inactivity_group, "roleregress", "on").callback(interaction)
+        await _find_command(inactivity_group, "roleregress", "policy_set").callback(interaction, role_a, role_b, 7, 14, 1, "OR", 0)
+        await _find_command(inactivity_group, "roleregress", "status").callback(interaction)
+        await _find_command(inactivity_group, "roleregress", "off").callback(interaction)
+
+        assert db.config["role_regress_enabled"] == 0
+        assert len(db.role_regress_policies) == 1
+        status_call = [c for c in send_response.await_args_list if c.kwargs.get("subcommand_path") == "inactivity roleregress status"][0]
+        status_map = {k: v for k, v in status_call.kwargs["lines"]}
+        assert status_map["enabled"] == "on"
+        assert status_map["policies"] == 1
 
     asyncio.run(_run())
 
