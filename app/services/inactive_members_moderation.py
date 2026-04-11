@@ -35,6 +35,8 @@ USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 MAX_FIELDS_PER_EMBED = 24
 INACTIVE_GRACE_TITLE_EMOJI, INACTIVE_GRACE_TITLE_TEXT = get_greetings_title_parts("inactive_grace")
 INACTIVE_TEMPBAN_TITLE_EMOJI, INACTIVE_TEMPBAN_TITLE_TEXT = get_greetings_title_parts("inactive_tempban")
+AUTO_INACTIVITY_LOOP_INTERVAL_SECONDS = 60
+AUTO_INACTIVITY_MIN_COOLDOWN_SECONDS = 45
 
 
 def _state_int(state: Any, key: str, default: int = 0) -> int:
@@ -209,11 +211,16 @@ class InactiveMembersModerationService:
         self._bot = bot
         self._member_flow_notifications = member_flow_notifications
         self._users_dm_service = UsersModerationDmService(database, bot)
-        self._task: asyncio.Task[None] | None = None
+        self._unban_task: asyncio.Task[None] | None = None
+        self._auto_inactivity_task: asyncio.Task[None] | None = None
+        self._auto_running_guild_ids: set[str] = set()
+        self._auto_last_run_at: dict[str, datetime] = {}
 
     def start(self) -> None:
-        if self._task is None:
-            self._task = asyncio.create_task(self._unban_loop())
+        if self._unban_task is None:
+            self._unban_task = asyncio.create_task(self._unban_loop())
+        if self._auto_inactivity_task is None:
+            self._auto_inactivity_task = asyncio.create_task(self._auto_inactivity_loop())
 
     async def _unban_loop(self) -> None:
         await self._bot.wait_until_ready()
@@ -241,6 +248,71 @@ class InactiveMembersModerationService:
             except Exception:
                 logger.warning("inactive moderation: failed unban user=%s guild=%s", user_id, guild.id, exc_info=True)
         await self._run_due_manual_grace_tempbans(now_iso)
+
+    async def _auto_inactivity_loop(self) -> None:
+        await self._bot.wait_until_ready()
+        logger.info("inactive moderation: autonomous inactivity enforcement loop started (interval=%ss)", AUTO_INACTIVITY_LOOP_INTERVAL_SECONDS)
+        while True:
+            try:
+                await self._auto_inactivity_tick()
+            except Exception:
+                logger.exception("inactive moderation auto inactivity tick failed")
+            await asyncio.sleep(AUTO_INACTIVITY_LOOP_INTERVAL_SECONDS)
+
+    async def _auto_inactivity_tick(self) -> None:
+        guilds = list(getattr(self._bot, "guilds", []) or [])
+        for guild in guilds:
+            guild_id = str(getattr(guild, "id", ""))
+            if not guild_id:
+                continue
+            result = await self.run_auto_inactivity_enforcement(guild_id)
+            status = str(result.get("status") or "unknown")
+            if status == "executed":
+                logger.info(
+                    "inactive moderation auto enforcement guild=%s grace=%s tempban=%s reminder_ok=%s kick_ok=%s ban_ok=%s",
+                    guild_id,
+                    result.get("grace_enabled"),
+                    result.get("tempban_enabled"),
+                    (result.get("reminder_stats") or {}).get("dm_ok", 0),
+                    (result.get("kick_stats") or {}).get("kick_ok", 0),
+                    (result.get("kick_stats") or {}).get("ban_ok", 0),
+                )
+            elif status in {"disabled", "auto_disabled"}:
+                logger.debug("inactive moderation auto enforcement skipped guild=%s reason=%s", guild_id, status)
+
+    async def run_auto_inactivity_enforcement(self, guild_id: str, *, ignore_cooldown: bool = False) -> dict[str, Any]:
+        if guild_id in self._auto_running_guild_ids:
+            return {"status": "already_running", "guild_id": guild_id}
+        now = datetime.now(timezone.utc)
+        last_run = self._auto_last_run_at.get(guild_id)
+        if not ignore_cooldown and last_run is not None and (now - last_run).total_seconds() < AUTO_INACTIVITY_MIN_COOLDOWN_SECONDS:
+            return {"status": "cooldown", "guild_id": guild_id}
+        self._auto_running_guild_ids.add(guild_id)
+        try:
+            cfg = await self._get_config(guild_id)
+            if not cfg or not bool(cfg.get("enabled")):
+                return {"status": "disabled", "guild_id": guild_id}
+            if not bool(cfg.get("auto_enabled")):
+                return {"status": "auto_disabled", "guild_id": guild_id}
+            grace_enabled = int(cfg.get("grace_days_after_reminder", 7) or 0) > 0
+            tempban_enabled = int(cfg.get("ban_days", 7) or 0) > 0
+            if grace_enabled:
+                kick_stats = await self.execute_kick_pipeline(guild_id, require_grace=True)
+                reminder_stats = await self.execute_reminders(guild_id)
+            else:
+                kick_stats = await self.execute_kick_pipeline(guild_id, require_grace=False)
+                reminder_stats = {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": []}
+            self._auto_last_run_at[guild_id] = now
+            return {
+                "status": "executed",
+                "guild_id": guild_id,
+                "grace_enabled": grace_enabled,
+                "tempban_enabled": tempban_enabled,
+                "reminder_stats": reminder_stats,
+                "kick_stats": kick_stats,
+            }
+        finally:
+            self._auto_running_guild_ids.discard(guild_id)
 
     async def _log_moderation_action(
         self,
@@ -667,10 +739,14 @@ class InactiveMembersModerationService:
         inactive, considered, _ = await self.scan_inactive_members(guild_id)
         await self.post_manual_panel(guild_id, mod_channel_id, inactive=inactive, cfg=cfg, considered=considered)
         if bool(cfg.get("auto_enabled")):
-            grace_enabled = int(cfg.get("grace_days_after_reminder", 7) or 0) > 0
-            kick_stats = await self.execute_kick_pipeline(guild_id, require_grace=grace_enabled)
-            reminder_stats = await self.execute_reminders(guild_id) if grace_enabled else {"dm_ok": 0, "dm_fail": 0, "errors": []}
-            await channel.send(embed=self.build_auto_inactive_completed_embed(reminder_stats, kick_stats))
+            result = await self.run_auto_inactivity_enforcement(guild_id)
+            if result.get("status") == "executed":
+                await channel.send(
+                    embed=self.build_auto_inactive_completed_embed(
+                        result.get("reminder_stats") or {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": []},
+                        result.get("kick_stats") or {},
+                    )
+                )
             return
 
         expired = await self._collect_expired_grace_users(guild_id, inactive, cfg)
@@ -948,6 +1024,10 @@ class InactiveMembersModerationService:
             latest_activity = self._parse_last_message_dt(candidate.last_message_ts)
             if grace_enabled and reminder_at is not None:
                 has_post_reminder_activity = latest_activity is not None and latest_activity > reminder_at
+                grace_expired = now - reminder_at >= timedelta(days=grace_days)
+                if grace_expired and not has_post_reminder_activity:
+                    skipped += 1
+                    continue
                 if not has_post_reminder_activity:
                     skipped += 1
                     continue

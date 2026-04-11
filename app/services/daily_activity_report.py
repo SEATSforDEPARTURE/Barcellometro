@@ -712,10 +712,14 @@ class DailyActivityReportService:
 
                 cfg = await self._inactive_moderation._get_config(guild_id)
                 if cfg and bool(cfg.get("enabled")) and bool(cfg.get("auto_enabled")):
-                    grace_enabled = int(cfg.get("grace_days_after_reminder", 7) or 0) > 0
-                    kick_stats = await self._inactive_moderation.execute_kick_pipeline(guild_id, require_grace=grace_enabled)
-                    reminder_stats = await self._inactive_moderation.execute_reminders(guild_id) if grace_enabled else {"dm_ok": 0, "dm_fail": 0, "errors": []}
-                    report_embeds.append(self._inactive_moderation.build_auto_inactive_completed_embed(reminder_stats, kick_stats))
+                    auto_result = await self._inactive_moderation.run_auto_inactivity_enforcement(guild_id)
+                    if auto_result.get("status") == "executed":
+                        report_embeds.append(
+                            self._inactive_moderation.build_auto_inactive_completed_embed(
+                                auto_result.get("reminder_stats") or {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": []},
+                                auto_result.get("kick_stats") or {},
+                            )
+                        )
             except Exception:
                 logger.exception("daily_activity_report: inactive moderation post-processing failed guild=%s", guild_id)
 

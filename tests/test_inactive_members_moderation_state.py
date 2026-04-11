@@ -719,33 +719,90 @@ def test_handle_post_activity_report_auto_runs_kick_before_reminders_and_reminde
         )
         service = InactiveMembersModerationService(database, SimpleNamespace(), member_flow_notifications=None)
         service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 7})
-        service.scan_inactive_members = AsyncMock(
-            side_effect=[
-                ([candidate], 1, {"enabled": True}),
-                ([candidate], 1, {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7}),
-            ]
-        )
+        service.scan_inactive_members = AsyncMock(return_value=([candidate], 1, {"enabled": True}))
         service.post_manual_panel = AsyncMock()
-        order: list[str] = []
-
-        async def _kick(_guild_id: str, *, require_grace: bool):
-            order.append(f"kick:{require_grace}")
-            return {"kick_ok": 1}
-
-        service.execute_kick_pipeline = AsyncMock(side_effect=_kick)
-        async def _execute_reminders_and_track(guild_id: str):
-            order.append("reminders")
-            return await InactiveMembersModerationService.execute_reminders(service, guild_id)
-        service.execute_reminders = AsyncMock(side_effect=_execute_reminders_and_track)
+        service.run_auto_inactivity_enforcement = AsyncMock(
+            return_value={"status": "executed", "reminder_stats": {"dm_ok": 1}, "kick_stats": {"kick_ok": 1}}
+        )
         service.build_auto_inactive_completed_embed = Mock(return_value=SimpleNamespace())
         service._bot = SimpleNamespace(get_guild=lambda guild_id: SimpleNamespace(id=guild_id), get_channel=lambda channel_id: SimpleNamespace(send=send_mock))
 
         with patch("app.services.inactive_members_moderation.discord.abc.Messageable", object):
             await service.handle_post_activity_report("1", "2")
 
-        assert order == ["kick:True", "reminders"]
+        service.run_auto_inactivity_enforcement.assert_awaited_once_with("1")
         send_mock.assert_awaited_once()
-        database.log_inactivity_dm_delivery.assert_awaited_once()
-        assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "success"
+
+    asyncio.run(_run())
+
+
+def test_run_auto_inactivity_enforcement_grace_off_runs_only_direct_kick_pipeline() -> None:
+    async def _run() -> None:
+        service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 0, "ban_days": 0})
+        service.execute_kick_pipeline = AsyncMock(return_value={"kick_ok": 2})
+        service.execute_reminders = AsyncMock(return_value={"dm_ok": 1})
+
+        result = await service.run_auto_inactivity_enforcement("1", ignore_cooldown=True)
+
+        assert result["status"] == "executed"
+        service.execute_kick_pipeline.assert_awaited_once_with("1", require_grace=False)
+        service.execute_reminders.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
+def test_run_auto_inactivity_enforcement_grace_on_runs_kick_then_reminders() -> None:
+    async def _run() -> None:
+        service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 7, "ban_days": 7})
+        order: list[str] = []
+
+        async def _kick(_guild_id: str, *, require_grace: bool) -> dict[str, int]:
+            order.append(f"kick:{require_grace}")
+            return {"kick_ok": 1}
+
+        async def _reminders(_guild_id: str) -> dict[str, int]:
+            order.append("reminders")
+            return {"dm_ok": 1}
+
+        service.execute_kick_pipeline = AsyncMock(side_effect=_kick)
+        service.execute_reminders = AsyncMock(side_effect=_reminders)
+
+        result = await service.run_auto_inactivity_enforcement("1", ignore_cooldown=True)
+
+        assert result["status"] == "executed"
+        assert order == ["kick:True", "reminders"]
+
+    asyncio.run(_run())
+
+
+def test_run_auto_inactivity_tick_invokes_enforcement_without_daily_report_dependency() -> None:
+    async def _run() -> None:
+        guild = SimpleNamespace(id=123)
+        bot = SimpleNamespace(guilds=[guild])
+        service = InactiveMembersModerationService(SimpleNamespace(), bot, member_flow_notifications=None)
+        service.run_auto_inactivity_enforcement = AsyncMock(return_value={"status": "executed", "reminder_stats": {}, "kick_stats": {}})
+
+        await service._auto_inactivity_tick()
+
+        service.run_auto_inactivity_enforcement.assert_awaited_once_with("123")
+
+    asyncio.run(_run())
+
+
+def test_run_auto_inactivity_enforcement_reports_tempban_flag_from_config() -> None:
+    async def _run() -> None:
+        service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
+        service.execute_kick_pipeline = AsyncMock(return_value={"kick_ok": 1, "ban_ok": 1})
+        service.execute_reminders = AsyncMock(return_value={"dm_ok": 0})
+
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 7, "ban_days": 7})
+        with_tempban = await service.run_auto_inactivity_enforcement("1", ignore_cooldown=True)
+        assert with_tempban["tempban_enabled"] is True
+
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "grace_days_after_reminder": 7, "ban_days": 0})
+        no_tempban = await service.run_auto_inactivity_enforcement("2", ignore_cooldown=True)
+        assert no_tempban["tempban_enabled"] is False
 
     asyncio.run(_run())
