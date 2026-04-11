@@ -768,7 +768,7 @@ class InactiveMembersModerationService:
 
         embeds: list[discord.Embed] = []
         for i, chunk in enumerate(chunks, start=1):
-            embed = discord.Embed(title=format_standard_title(f"INATTIVI (SERVER-WIDE) — PAG. {i}/{total_pages}", emoji="✏️"), colour=discord.Colour.blue())
+            embed = discord.Embed(title=format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️"), colour=discord.Colour.blue())
             if i == 1:
                 safe_add_field(embed, name=format_standard_field_name("Membri analizzati"), value=str(considered), inline=True)
                 safe_add_field(embed, name=format_standard_field_name("Inattivi trovati"), value=str(len(inactive)), inline=True)

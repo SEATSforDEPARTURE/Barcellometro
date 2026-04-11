@@ -21,6 +21,7 @@ from app.services.daily_activity_report import (
     build_combined_activity_inactive_txt,
 )
 from app.services.footer import FooterService, attach_footer_meta, get_footer_meta
+from app.shared.discord.embed_body import format_standard_title
 
 
 class _FakePaginationDatabase:
@@ -315,3 +316,61 @@ def test_inactive_embed_builder_and_single_send_flow_are_present() -> None:
     assert "build_serverwide_inactive_embeds(" in report_source
     assert "channel.send(embed=report_embeds[0], view=view" in report_source
     assert "for idx in range(0, len(embeds), 10)" not in report_source
+
+
+def test_daily_report_navigation_reapplies_canonical_serversummary_author_pagination() -> None:
+    async def _run() -> None:
+        service, _, _ = _build_service()
+        embed_one = discord.Embed(title="Pagina attività", description="Contenuto attività")
+        embed_two = discord.Embed(title="Pagina inattivi", description="Contenuto inattivi")
+        attach_footer_meta(embed_one, service_name="daily_activity_report", used_local_processing=True)
+        attach_footer_meta(embed_two, service_name="inactivity_moderation", used_local_processing=True)
+
+        await service.persist_pagination_record(
+            message_id="102",
+            channel_id="7",
+            guild_id="9",
+            embeds=[embed_one, embed_two],
+            metadata={"has_activity": True, "has_inactive": True},
+            current_index=0,
+        )
+
+        captured: dict[str, object] = {}
+
+        class _Response:
+            async def edit_message(self, *, embed: discord.Embed, view: object) -> None:
+                captured["embed"] = embed
+                captured["view"] = view
+
+        interaction = SimpleNamespace(
+            message=SimpleNamespace(id=102),
+            response=_Response(),
+        )
+
+        view = DailyReportPaginationView(service, current_index=0, total_pages=2)
+        await view._navigate(interaction, action="next")
+
+        edited_embed = captured["embed"]
+        assert isinstance(edited_embed, discord.Embed)
+        assert edited_embed.author.name == "servizio SERVER SUMMARY · (Pag. 2/2)"
+
+    asyncio.run(_run())
+
+
+def test_daily_report_source_finalizes_canonical_serversummary_author_before_send() -> None:
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
+
+    attach_idx = report_source.index("attach_author_meta_to_all(")
+    finalize_idx = report_source.index('await finalize_embeds_author(report_embeds, None, default_service_name="daily_resoconto")')
+    send_idx = report_source.index("channel.send(embed=report_embeds[0], view=view")
+
+    assert "canonical_top_level_command=\"serversummary\"" in report_source
+    assert attach_idx < finalize_idx < send_idx
+
+
+def test_inactive_serverwide_embed_title_has_no_page_suffix() -> None:
+    inactive_source = Path("app/services/inactive_members_moderation.py").read_text(encoding="utf-8")
+
+    assert 'format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️")' in inactive_source
+    assert "INATTIVI (SERVER-WIDE) — PAG." not in inactive_source
+    assert format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️") == "✏️ __**INATTIVI (SERVER-WIDE)**__"

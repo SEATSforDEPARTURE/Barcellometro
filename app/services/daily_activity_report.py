@@ -17,10 +17,12 @@ import discord
 from app.renderers.activity_report_renderer import build_daily_activity_details_txt, build_daily_activity_embeds
 from app.plugins.commands_modular.time_windows import infer_rolling_window_request
 from app.services.activity_insights import ActivityInsightsService
+from app.services.author import attach_author_meta, attach_author_meta_to_all
 from app.services.database import DatabaseService
 from app.services.footer import FooterService
 from app.services.daily_activity_sorting import sort_channels_like_discord, sort_inactive_entries
 from app.shared.discord.component_notices import send_standard_component_notice
+from app.shared.discord.author_pipeline import finalize_embed_author, finalize_embeds_author
 from app.services.discord_embed_utils import extract_persistable_footer_context, hydrate_persisted_embed_with_footer
 
 logger = logging.getLogger(__name__)
@@ -131,6 +133,20 @@ class DailyReportPaginationView(discord.ui.View):
             footer_service=self._report_service.footer_service,
             default_service_name="daily_activity_report",
             finalize=True,
+        )
+        attach_author_meta(
+            embed,
+            service_name="daily_resoconto",
+            canonical_top_level_command="serversummary",
+            logical_page_index=target_index + 1,
+            logical_page_total=len(embeds_payload),
+        )
+        await finalize_embed_author(
+            embed,
+            None,
+            default_service_name="daily_resoconto",
+            page_index=target_index + 1,
+            page_total=len(embeds_payload),
         )
         await self._report_service.persist_pagination_current_index(message_id=str(message.id), current_index=target_index)
         await interaction.response.edit_message(embed=embed, view=self)
@@ -704,6 +720,12 @@ class DailyActivityReportService:
 
         if not report_embeds:
             return
+        attach_author_meta_to_all(
+            report_embeds,
+            service_name="daily_resoconto",
+            canonical_top_level_command="serversummary",
+        )
+        await finalize_embeds_author(report_embeds, None, default_service_name="daily_resoconto")
 
         _, _, txt_file = build_combined_activity_inactive_txt(
             activity_txt_payload=activity_txt_payload,
