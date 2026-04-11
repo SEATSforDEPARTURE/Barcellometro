@@ -661,6 +661,23 @@ def test_example_config_closing_comments_are_varied_and_not_technical() -> None:
         assert len(closing) >= 3
 
 
+def test_inactive_role_regress_copy_does_not_include_redundant_role_removal_phrase() -> None:
+    service = GreetingsCopyService(_FakeDatabase(), config_path="settings/greetings_trigger.example.json")
+    result = asyncio.run(
+        service.render_event_copy(
+            guild=SimpleNamespace(id=1, name="GABBIETTA DORATA"),
+            user=SimpleNamespace(id=42, name="fakuzzo", display_name="Fakuzzo", mention="@Fakuzzo"),
+            event_type_key="inactive_role_regress",
+            reason="Inattività",
+            barcello_status={"color": "verde", "score": 84},
+            now=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    lowered = result.narrative.lower()
+    assert "rimozione del ruolo precedente e assegnazione del nuovo ruolo" not in lowered
+    assert "retrocesso di ruolo" in lowered
+
+
 def test_defaults_fallback_is_used_when_main_templates_are_missing(tmp_path) -> None:
     payload = {
         "templates": {"kick": []},

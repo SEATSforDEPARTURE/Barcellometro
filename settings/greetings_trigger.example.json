@@ -105,7 +105,7 @@
       },
       "inactive_role_regress": {
         "default": [
-          "{mention} è stato retrocesso di ruolo per inattività in {guild_name}: rimosso il ruolo precedente e assegnato il nuovo ruolo."
+          "{mention} è stato retrocesso di ruolo per inattività in {guild_name}."
         ]
       }
     }
@@ -223,8 +223,8 @@
     "inactive_role_regress": {
       "opening": "{mention}",
       "action_phrase": "è stato retrocesso di ruolo",
-      "occurrence_phrase": "in {guild_name} per inattività con",
-      "detail_phrase": "rimozione del ruolo precedente e assegnazione del nuovo ruolo",
+      "occurrence_phrase": "in {guild_name} per inattività.",
+      "detail_phrase": "",
       "closing_comment": [
         "Si riparte dal nuovo livello.",
         "Un passaggio netto, ora conta la continuità.",
