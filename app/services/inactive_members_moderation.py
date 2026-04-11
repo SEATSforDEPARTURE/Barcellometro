@@ -21,12 +21,13 @@ from app.services.dm_template_placeholders import render_dm_template
 from app.services.inactivity_dm_templates import build_inactivity_dm_template_payload
 from app.services.users_moderation_dms import UsersModerationDmService
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
-from app.shared.discord.embed_body import format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
 ROME = ZoneInfo("Europe/Rome")
 USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
+MAX_FIELDS_PER_EMBED = 24
 INACTIVE_GRACE_TITLE_EMOJI, INACTIVE_GRACE_TITLE_TEXT = get_greetings_title_parts("inactive_grace")
 INACTIVE_TEMPBAN_TITLE_EMOJI, INACTIVE_TEMPBAN_TITLE_TEXT = get_greetings_title_parts("inactive_tempban")
 
@@ -740,41 +741,45 @@ class InactiveMembersModerationService:
             for i, candidate in enumerate(ordered, start=1)
         ]
 
-        max_desc = 3900
-
-        def _chunk_lines(lines: list[str]) -> list[str]:
+        def _chunk_lines_for_field(lines: list[str]) -> list[str]:
             if not lines:
                 return ["Nessun inattivo."]
             chunks: list[str] = []
-            current = ""
+            current: list[str] = []
+            current_len = 0
             for raw_line in lines:
-                line = raw_line if len(raw_line) <= 3500 else f"{raw_line[:3500]}…"
-                add = line if not current else f"\n{line}"
-                if len(current) + len(add) > max_desc:
-                    if current:
-                        chunks.append(current)
-                        current = line
-                    else:
-                        chunks.append(line[:max_desc])
-                        current = ""
+                line = raw_line if len(raw_line) <= FIELD_MAX else f"{raw_line[: FIELD_MAX - 1]}…"
+                candidate_len = len(line) + (1 if current else 0)
+                if current and current_len + candidate_len > FIELD_MAX:
+                    chunks.append("\n".join(current))
+                    current = [line]
+                    current_len = len(line)
                 else:
-                    current += add
+                    current.append(line)
+                    current_len += candidate_len
             if current:
-                chunks.append(current)
+                chunks.append("\n".join(current))
             return chunks
 
-        chunks = _chunk_lines(all_lines)
-        total_pages = len(chunks)
-
         embeds: list[discord.Embed] = []
-        for i, chunk in enumerate(chunks, start=1):
-            embed = discord.Embed(title=format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️"), colour=discord.Colour.blue())
-            if i == 1:
-                safe_add_field(embed, name=format_standard_field_name("Membri analizzati"), value=str(considered), inline=True)
-                safe_add_field(embed, name=format_standard_field_name("Inattivi trovati"), value=str(len(inactive)), inline=True)
-                safe_add_field(embed, name=format_standard_field_name("Stato reminder"), value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
-            embed.description = chunk
-            embeds.append(embed)
+        inactive_field_chunks = _chunk_lines_for_field(all_lines)
+        for i, chunk in enumerate(inactive_field_chunks):
+            if not embeds or len(embeds[-1].fields) >= MAX_FIELDS_PER_EMBED:
+                embed = discord.Embed(
+                    title=format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️"),
+                    colour=discord.Colour.blue(),
+                    description=format_standard_description(
+                        "Panoramica dei membri inattivi rilevati secondo la policy attiva.",
+                        italic=True,
+                    ),
+                )
+                if not embeds:
+                    safe_add_field(embed, name=format_standard_field_name("Membri analizzati"), value=str(considered), inline=True)
+                    safe_add_field(embed, name=format_standard_field_name("Inattivi trovati"), value=str(len(inactive)), inline=True)
+                    safe_add_field(embed, name=format_standard_field_name("Stato reminder"), value=f"🔔 Avvisati: {warned}\n⏳ In grace: {in_grace}\n⚠️ Grace scaduto: {expired_grace}", inline=True)
+                embeds.append(embed)
+            field_label = "INATTIVI" if i == 0 else "INATTIVI (CONT.)"
+            safe_add_field(embeds[-1], name=format_standard_field_name(field_label, emoji="✏️"), value=chunk, inline=False)
         attach_footer_meta_to_all(embeds, service_name="inactivity_moderation", used_local_processing=True)
 
         txt_file: discord.File | None = None
@@ -1301,15 +1306,21 @@ class InactiveMembersModerationService:
                 if isinstance(value, int):
                     merged[key] = int(merged.get(key, 0)) + value
         lines = [
-            f"DM success/fail: **{merged.get('dm_ok', 0)}/{merged.get('dm_fail', 0)}**",
-            f"Kick success/fail: **{merged.get('kick_ok', 0)}/{merged.get('kick_fail', 0)}**",
-            f"Ban success/fail: **{merged.get('ban_ok', 0)}/{merged.get('ban_fail', 0)}**",
-            f"Notify posted: **{merged.get('notify_ok', 0)}**",
+            f"• DM success/fail: **{merged.get('dm_ok', 0)}/{merged.get('dm_fail', 0)}**",
+            f"• Kick success/fail: **{merged.get('kick_ok', 0)}/{merged.get('kick_fail', 0)}**",
+            f"• Ban success/fail: **{merged.get('ban_ok', 0)}/{merged.get('ban_fail', 0)}**",
+            f"• Notify posted: **{merged.get('notify_ok', 0)}**",
         ]
         errors = merged.get("errors") or []
         if errors:
-            lines.append("Errori: " + "; ".join(errors[:10]))
-        safe_set_description(embed, "\n".join(lines))
+            lines.append("• Errori: " + "; ".join(errors[:10]))
+        safe_set_description(embed, format_standard_description("Operazione automatica inattivi completata con riepilogo finale.", italic=True))
+        safe_add_field(
+            embed,
+            name=format_standard_field_name("Dettagli", emoji="📌"),
+            value="\n".join(lines),
+            inline=False,
+        )
         attach_footer_meta(embed, service_name="inactivity_moderation", used_local_processing=True)
         return embed
     @staticmethod

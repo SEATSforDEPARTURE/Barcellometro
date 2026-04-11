@@ -191,3 +191,39 @@ def test_daily_renderer_embeds_use_range_window_header(renderer_module) -> None:
 
     period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
     assert "🗓️ 10/03/2026 00:00 → 12/03/2026 01:00" in period_field
+
+
+def test_daily_renderer_removes_stato_attivita_field_and_uses_narrative_italic_description(renderer_module) -> None:
+    embeds = renderer_module.build_daily_activity_embeds(
+        _Guild(),
+        "Test Server",
+        _payloads(),
+        server_summary={
+            "active_non_bot": 3,
+            "total_non_bot_members": 12,
+            "inactive_non_bot": 9,
+            "peak_hour": 22,
+            "silence_hour": 4,
+            "continuity_hours": 8,
+            "label": "INTENSA",
+            "score": 74,
+            "trend_text": "Messaggi in crescita (+40% vs finestra precedente).",
+        },
+        period_label="ieri",
+        window_start_dt=datetime(2026, 4, 10, 0, 0),
+        window_end_dt=datetime(2026, 4, 11, 0, 0),
+    )
+
+    overview = embeds[0]
+    overview_names = [field.name for field in overview.fields]
+    assert format_standard_field_name("STATO ATTIVITÀ", emoji="🟢") not in overview_names
+    assert overview.description and overview.description.startswith("*") and overview.description.endswith("*")
+    assert "**Ieri. Venerdì, 10 Aprile 2026**" in overview.description
+    assert "attività **intensa**" in overview.description
+
+    channel = embeds[1]
+    channel_names = [field.name for field in channel.fields]
+    assert format_standard_field_name("STATO ATTIVITÀ", emoji="🟢") not in channel_names
+    assert channel.description and channel.description.startswith("*") and channel.description.endswith("*")
+    assert "**Ieri. Venerdì, 10 Aprile 2026**" in channel.description
+    assert "#general ha mostrato un'attività **intensa**" in channel.description
