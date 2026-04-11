@@ -313,6 +313,26 @@ def test_execute_reminders_skips_members_already_role_regressed() -> None:
     asyncio.run(_run())
 
 
+def test_execute_reminders_exposes_role_regress_and_dm_breakdown_stats() -> None:
+    async def _run() -> None:
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace()
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+        service.execute_role_regress = AsyncMock(return_value={"processed_user_ids": set(), "applied": 2, "failed": 1, "dm_ok": 3, "dm_fail": 2})
+        service.scan_inactive_members = AsyncMock(return_value=([], 0, {"dm_reminders_enabled": 1, "grace_days_after_reminder": 7}))
+
+        result = await service.execute_reminders("1")
+
+        assert result["dm_reminder_ok"] == 0
+        assert result["dm_reminder_fail"] == 0
+        assert result["dm_role_regress_ok"] == 3
+        assert result["dm_role_regress_fail"] == 2
+        assert result["role_regress_ok"] == 2
+        assert result["role_regress_fail"] == 1
+
+    asyncio.run(_run())
+
+
 def test_apply_role_regress_removes_old_role_and_adds_new_role() -> None:
     async def _run() -> None:
         old_role = SimpleNamespace(id=10, name="CRICETINE")
@@ -323,7 +343,7 @@ def test_apply_role_regress_removes_old_role_and_adds_new_role() -> None:
             get_role=lambda role_id: old_role if role_id == 10 else new_role if role_id == 11 else None,
         )
         service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
-        ok, error = await service.apply_role_regress(
+        ok, error, dm_ok, dm_fail = await service.apply_role_regress(
             guild,
             member,
             {"role_to_regress": "10", "role_after_regress": "11"},
@@ -334,6 +354,8 @@ def test_apply_role_regress_removes_old_role_and_adds_new_role() -> None:
 
         assert ok is True
         assert error is None
+        assert dm_ok >= 0
+        assert dm_fail >= 0
         edited_roles = member.edit.await_args.kwargs["roles"]
         assert old_role not in edited_roles
         assert new_role in edited_roles
@@ -345,7 +367,7 @@ def test_apply_role_regress_sends_custom_inactivity_dm_template() -> None:
     async def _run() -> None:
         old_role = SimpleNamespace(id=10, name="CRICETINE")
         new_role = SimpleNamespace(id=11, name="POLLE")
-        member = SimpleNamespace(id=42, roles=[old_role], edit=AsyncMock(), mention="<@42>", send=AsyncMock())
+        member = SimpleNamespace(id=42, name="Dormiente", display_name="Dormiente", roles=[old_role], edit=AsyncMock(), mention="<@42>", send=AsyncMock())
         guild = SimpleNamespace(
             id=1,
             name="Barcellometro",
@@ -354,7 +376,7 @@ def test_apply_role_regress_sends_custom_inactivity_dm_template() -> None:
         database = SimpleNamespace(log_inactivity_dm_delivery=AsyncMock())
         service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
 
-        ok, error = await service.apply_role_regress(
+        ok, error, dm_ok, dm_fail = await service.apply_role_regress(
             guild,
             member,
             {"role_to_regress": "10", "role_after_regress": "11", "window_days": 21, "min_messages": 2},
@@ -365,10 +387,16 @@ def test_apply_role_regress_sends_custom_inactivity_dm_template() -> None:
 
         assert ok is True
         assert error is None
-        sent_embed = member.send.await_args.kwargs["embed"]
-        assert "Regress ***CRICETINE***->***POLLE*** per ***14*** giorni" in str(sent_embed.description)
-        assert sent_embed.title == "↘️ __**REGRESSIONE RUOLO**__"
-        assert sent_embed.author.name == "servizio INACTIVITY"
+        assert dm_ok >= 0
+        assert dm_fail >= 0
+        first_send_call = member.send.await_args_list[0]
+        sent_payload = first_send_call.kwargs.get("embed") or first_send_call.args[0]
+        if isinstance(sent_payload, str):
+            assert "Regress ***CRICETINE***->***POLLE*** per ***14*** giorni" in sent_payload
+        else:
+            assert "Regress ***CRICETINE***->***POLLE*** per ***14*** giorni" in str(sent_payload.description)
+            assert sent_payload.title == "↘️ __**REGRESSIONE RUOLO**__"
+            assert sent_payload.author.name == "servizio INACTIVITY"
         assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "inactive_role_regress"
         assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "success"
 
@@ -379,7 +407,7 @@ def test_apply_role_regress_uses_default_template_when_custom_missing() -> None:
     async def _run() -> None:
         old_role = SimpleNamespace(id=10, name="CRICETINE")
         new_role = SimpleNamespace(id=11, name="POLLE")
-        member = SimpleNamespace(id=42, roles=[old_role], edit=AsyncMock(), mention="<@42>", send=AsyncMock())
+        member = SimpleNamespace(id=42, name="Dormiente", display_name="Dormiente", roles=[old_role], edit=AsyncMock(), mention="<@42>", send=AsyncMock())
         guild = SimpleNamespace(
             id=1,
             name="Barcellometro",
@@ -388,7 +416,7 @@ def test_apply_role_regress_uses_default_template_when_custom_missing() -> None:
         database = SimpleNamespace(log_inactivity_dm_delivery=AsyncMock())
         service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
 
-        ok, error = await service.apply_role_regress(
+        ok, error, dm_ok, dm_fail = await service.apply_role_regress(
             guild,
             member,
             {"role_to_regress": "10", "role_after_regress": "11", "window_days": 30, "min_messages": 1},
@@ -399,7 +427,10 @@ def test_apply_role_regress_uses_default_template_when_custom_missing() -> None:
 
         assert ok is True
         assert error is None
-        sent_embed = member.send.await_args.kwargs["embed"]
+        assert dm_ok >= 0
+        assert dm_fail >= 0
+        first_send_call = member.send.await_args_list[0]
+        sent_embed = first_send_call.kwargs.get("embed") or first_send_call.args[0]
         assert "CRICETINE" in str(sent_embed.description)
         assert "POLLE" in str(sent_embed.description)
         assert "finestra ***30***g" in str(sent_embed.description)
@@ -698,15 +729,34 @@ def test_build_action_embed_moves_main_content_to_dedicated_details_field() -> N
     service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
     embed = service.build_action_embed(
         "🤖 Auto inattivi completata",
-        {"dm_ok": 2, "dm_fail": 1, "kick_ok": 3, "kick_fail": 0, "ban_ok": 1, "ban_fail": 0, "notify_ok": 4, "errors": ["timeout"]},
+        {
+            "dm_ok": 2,
+            "dm_fail": 1,
+            "dm_reminder_ok": 2,
+            "dm_reminder_fail": 1,
+            "dm_role_regress_ok": 5,
+            "dm_role_regress_fail": 2,
+            "role_regress_ok": 4,
+            "role_regress_fail": 1,
+            "kick_ok": 3,
+            "kick_fail": 0,
+            "ban_ok": 1,
+            "ban_fail": 0,
+            "notify_ok": 4,
+            "errors": ["timeout"],
+        },
     )
 
     assert embed.title == "🗣️ __**RESOCONTO SERVER · INATTIVI CHECK**__"
     assert embed.description.startswith("*") and embed.description.endswith("*")
     assert "riepilogo finale" in embed.description.lower()
-    assert "DM success/fail" not in embed.description
+    assert "DM reminder/grace success/fail" not in embed.description
     detail_field = next(field for field in embed.fields if field.name == format_standard_field_name("DETTAGLI", emoji="📌"))
-    assert "• DM success/fail: **2/1**" in detail_field.value
+    assert "• DM reminder/grace success/fail: **2/1**" in detail_field.value
+    assert "• DM role regress success/fail: **5/2**" in detail_field.value
+    assert "• Regress role success/fail: **4/1**" in detail_field.value
+    assert "• Kick success/fail: **3/0**" in detail_field.value
+    assert "• Ban success/fail: **1/0**" in detail_field.value
     assert "• Errori: timeout" in detail_field.value
 
 
