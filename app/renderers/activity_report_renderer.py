@@ -13,7 +13,11 @@ from app.renderers.channel_summary import (
 from app.services.author import attach_author_meta
 from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta
-from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import (
+    build_server_summary_title,
+    format_standard_description,
+    format_standard_field_name,
+)
 
 ITALIAN_WEEKDAYS = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
 ITALIAN_MONTHS = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
@@ -150,7 +154,7 @@ def build_daily_activity_embeds(
     )
 
     overview = discord.Embed(
-        title=format_standard_title(f"RESOCONTO SERVER “{guild_name}”", emoji="🗣️"),
+        title=build_server_summary_title("PANORAMICA"),
         color=_color_for_emoji(emoji),
         description=format_standard_description(
             _build_server_activity_description(window_header=window_header, label=label),
@@ -206,7 +210,7 @@ def build_daily_activity_embeds(
             else:
                 stats_lines.append("• Chiamate: **0**")
         embed = discord.Embed(
-            title=format_standard_title(f"DETTAGLI ATTIVITÀ “#{getattr(dc, 'name', 'sconosciuto')}”", emoji="📄"),
+            title=build_server_summary_title("DETTAGLI CANALE"),
             color=_color_for_emoji(s.emoji),
             description=format_standard_description(
                 _build_channel_activity_description(

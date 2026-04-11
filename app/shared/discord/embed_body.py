@@ -57,6 +57,11 @@ def format_standard_title(text: str, *, emoji: str | None = None, uppercase: boo
     return _truncate(rendered, DISCORD_TITLE_MAX)
 
 
+def build_server_summary_title(section: str) -> str:
+    normalized_section = str(section or "").strip().upper()
+    return format_standard_title(f"RESOCONTO SERVER · {normalized_section}", emoji="🗣️")
+
+
 def build_user_event_title(*, event_text: str, display_name: str, emoji: str) -> str:
     cleaned_name = clean_embed_display_name(display_name)
     return format_standard_title(f'"{cleaned_name}" {event_text}', emoji=emoji)

@@ -21,7 +21,12 @@ from app.services.dm_template_placeholders import render_dm_template
 from app.services.inactivity_dm_templates import build_inactivity_dm_template_payload
 from app.services.users_moderation_dms import UsersModerationDmService
 from app.shared.discord.dm_embed_builder import build_standard_dm_embed
-from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
+from app.shared.discord.embed_body import (
+    build_server_summary_title,
+    format_standard_description,
+    format_standard_field_name,
+    format_standard_title,
+)
 from app.shared.discord.component_notices import send_standard_component_notice
 
 logger = logging.getLogger(__name__)
@@ -766,7 +771,7 @@ class InactiveMembersModerationService:
         for i, chunk in enumerate(inactive_field_chunks):
             if not embeds or len(embeds[-1].fields) >= MAX_FIELDS_PER_EMBED:
                 embed = discord.Embed(
-                    title=format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️"),
+                    title=build_server_summary_title("INATTIVI"),
                     colour=discord.Colour.blue(),
                     description=format_standard_description(
                         "Panoramica dei membri inattivi rilevati secondo la policy attiva.",
@@ -1299,7 +1304,8 @@ class InactiveMembersModerationService:
         return self.build_action_embed("🤖 Auto inattivi completata", reminder_stats, kick_stats)
 
     def build_action_embed(self, title: str, stats: dict[str, Any], extra: dict[str, Any] | None = None) -> discord.Embed:
-        embed = discord.Embed(title=format_standard_title(title), color=0x57F287)
+        _ = title
+        embed = discord.Embed(title=build_server_summary_title("INATTIVI CHECK"), color=0x57F287)
         merged = dict(stats)
         if extra:
             for key, value in extra.items():
