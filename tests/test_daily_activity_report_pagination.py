@@ -371,6 +371,6 @@ def test_daily_report_source_finalizes_canonical_serversummary_author_before_sen
 def test_inactive_serverwide_embed_title_has_no_page_suffix() -> None:
     inactive_source = Path("app/services/inactive_members_moderation.py").read_text(encoding="utf-8")
 
-    assert 'format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️")' in inactive_source
+    assert 'build_server_summary_title("INATTIVI")' in inactive_source
     assert "INATTIVI (SERVER-WIDE) — PAG." not in inactive_source
-    assert format_standard_title("INATTIVI (SERVER-WIDE)", emoji="✏️") == "✏️ __**INATTIVI (SERVER-WIDE)**__"
+    assert format_standard_title("RESOCONTO SERVER · INATTIVI", emoji="🗣️") == "🗣️ __**RESOCONTO SERVER · INATTIVI**__"

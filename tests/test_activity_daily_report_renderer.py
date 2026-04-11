@@ -89,6 +89,11 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
         window_end_dt=datetime(2026, 2, 20, 10, 0),
     )
 
+    assert embeds[0].title == "🗣️ __**RESOCONTO SERVER · PANORAMICA**__"
+    assert embeds[1].title == "🗣️ __**RESOCONTO SERVER · DETTAGLI CANALE**__"
+    assert "general" not in embeds[1].title
+    assert "#" not in embeds[1].title
+
     first_names = [f.name for f in embeds[0].fields]
     assert format_standard_field_name("PERIODO", emoji="🕒") not in first_names
     assert format_standard_field_name("TREND", emoji="📈") in first_names

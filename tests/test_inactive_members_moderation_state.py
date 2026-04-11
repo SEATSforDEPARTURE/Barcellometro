@@ -541,7 +541,11 @@ def test_build_serverwide_inactive_embeds_uses_intro_description_and_chunked_fie
         assert embeds
         assert txt_file is not None
         first = embeds[0]
-        assert first.title == "✏️ __**INATTIVI (SERVER-WIDE)**__"
+        assert first.title == "🗣️ __**RESOCONTO SERVER · INATTIVI**__"
+        assert "#" not in first.title
+        assert "Barcellometro" not in first.title
+        assert "PAG." not in first.title
+        assert "“" not in first.title
         assert first.description.startswith("*") and first.description.endswith("*")
         assert "Panoramica dei membri inattivi" in first.description
         first_names = [field.name for field in first.fields]
@@ -563,6 +567,7 @@ def test_build_action_embed_moves_main_content_to_dedicated_details_field() -> N
         {"dm_ok": 2, "dm_fail": 1, "kick_ok": 3, "kick_fail": 0, "ban_ok": 1, "ban_fail": 0, "notify_ok": 4, "errors": ["timeout"]},
     )
 
+    assert embed.title == "🗣️ __**RESOCONTO SERVER · INATTIVI CHECK**__"
     assert embed.description.startswith("*") and embed.description.endswith("*")
     assert "riepilogo finale" in embed.description.lower()
     assert "DM success/fail" not in embed.description
