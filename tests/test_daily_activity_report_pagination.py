@@ -374,3 +374,19 @@ def test_inactive_serverwide_embed_title_has_no_page_suffix() -> None:
     assert 'build_server_summary_title("INATTIVI")' in inactive_source
     assert "INATTIVI (SERVER-WIDE) — PAG." not in inactive_source
     assert format_standard_title("RESOCONTO SERVER · INATTIVI", emoji="🗣️") == "🗣️ __**RESOCONTO SERVER · INATTIVI**__"
+
+
+def test_daily_report_auto_inactive_flow_runs_kick_before_reminders() -> None:
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
+
+    kick_idx = report_source.index("kick_stats = await self._inactive_moderation.execute_kick_pipeline(guild_id, require_grace=grace_enabled)")
+    reminder_idx = report_source.index("reminder_stats = await self._inactive_moderation.execute_reminders(guild_id) if grace_enabled else")
+
+    assert kick_idx < reminder_idx
+
+
+def test_daily_report_auto_inactive_flow_derives_require_grace_from_config() -> None:
+    report_source = Path("app/services/daily_activity_report.py").read_text(encoding="utf-8")
+
+    assert "grace_enabled = int(cfg.get(\"grace_days_after_reminder\", 7) or 0) > 0" in report_source
+    assert "execute_kick_pipeline(guild_id, require_grace=True)" not in report_source

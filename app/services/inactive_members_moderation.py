@@ -668,8 +668,8 @@ class InactiveMembersModerationService:
         await self.post_manual_panel(guild_id, mod_channel_id, inactive=inactive, cfg=cfg, considered=considered)
         if bool(cfg.get("auto_enabled")):
             grace_enabled = int(cfg.get("grace_days_after_reminder", 7) or 0) > 0
-            reminder_stats = await self.execute_reminders(guild_id) if grace_enabled else {"dm_ok": 0, "dm_fail": 0, "errors": []}
             kick_stats = await self.execute_kick_pipeline(guild_id, require_grace=grace_enabled)
+            reminder_stats = await self.execute_reminders(guild_id) if grace_enabled else {"dm_ok": 0, "dm_fail": 0, "errors": []}
             await channel.send(embed=self.build_auto_inactive_completed_embed(reminder_stats, kick_stats))
             return
 
@@ -931,6 +931,8 @@ class InactiveMembersModerationService:
             logger.info("inactive reminders disabled for guild=%s", guild_id)
             return {"dm_ok": 0, "dm_fail": 0, "dm_skipped": 0, "errors": [], "disabled": True}
         now = datetime.now(timezone.utc)
+        grace_days = int(cfg.get("grace_days_after_reminder", 7) or 7)
+        grace_enabled = grace_days > 0
         grace_template = cfg.get("template_grace") or cfg.get("dm_reminder_template") or "Ciao {user}, sei inattivo su {server} da {days_inactive} giorni. Ti aspettiamo!"
         raw_cooldown_seconds = cfg.get("reminder_cooldown_seconds")
         if raw_cooldown_seconds is None:
@@ -942,6 +944,29 @@ class InactiveMembersModerationService:
         errors: list[str] = []
         for candidate in inactive:
             state = await self._database.get_inactivity_user_state(guild_id, str(candidate.member.id))
+            reminder_at = self._parse_state_reminder_dt(state)
+            latest_activity = self._parse_last_message_dt(candidate.last_message_ts)
+            if grace_enabled and reminder_at is not None:
+                has_post_reminder_activity = latest_activity is not None and latest_activity > reminder_at
+                if not has_post_reminder_activity:
+                    skipped += 1
+                    await self._database.log_inactivity_dm_delivery(
+                        guild_id=guild_id,
+                        user_id=str(candidate.member.id),
+                        event_type="grace",
+                        reason="already_in_grace",
+                        sent_at=now.isoformat(),
+                        outcome="skipped",
+                        error_summary="already_in_grace",
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": candidate.days_inactive,
+                            "message_count": candidate.count_in_window,
+                            "grace_days": grace_days,
+                        },
+                    )
+                    continue
+
             latest_delivery = await self._latest_grace_dm_delivery(guild_id, str(candidate.member.id))
             if latest_delivery and latest_delivery["sent_at"] and str(latest_delivery["outcome"] or "").lower() == "success":
                 try:
@@ -969,6 +994,13 @@ class InactiveMembersModerationService:
                 except Exception:
                     logger.debug("inactive reminder cooldown parse failed", exc_info=True)
             inactivity_text = f"è stato inattivo per {candidate.days_inactive} giorni"
+            expires_at = now + timedelta(days=grace_days)
+            grace_metadata = {
+                "source": "inactive_members_moderation",
+                "greetings_reason": "",
+                "days_inactive": candidate.days_inactive,
+                "inactivity_text": inactivity_text,
+            }
             body = self._render_template(
                 grace_template,
                 member=candidate.member,
@@ -984,10 +1016,10 @@ class InactiveMembersModerationService:
                 inactivity_text=inactivity_text,
                 event_state="grace_started",
                 event_cause="inactivity",
-                duration_seconds=int(cfg.get("grace_days_after_reminder", 7) or 7) * 86400,
+                duration_seconds=grace_days * 86400,
                 now=now,
                 started_at=now,
-                expires_at=now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7))),
+                expires_at=expires_at,
             )
             reminder_embed = await build_standard_dm_embed(
                 service_name="inactivity",
@@ -997,6 +1029,31 @@ class InactiveMembersModerationService:
                 description=body,
                 color=self._resolve_inactivity_dm_color(cfg.get("template_grace_embed_color"), discord.Colour.blurple()),
             )
+
+            async def _log_grace_event() -> None:
+                if self._member_flow_notifications is None:
+                    return
+                result = await self._member_flow_notifications.log_action(
+                    guild_id=guild_id,
+                    user_id=str(candidate.member.id),
+                    moderator_id=None,
+                    action_type="inactive_grace",
+                    reason=None,
+                    duration_seconds=grace_days * 86400,
+                    expires_at=expires_at.isoformat(),
+                    metadata=grace_metadata,
+                )
+                if result.get("canonical_written") and result.get("canonical_visible"):
+                    await self._member_flow_notifications.send_notification(
+                        guild=guild,
+                        user=candidate.member,
+                        action_type="inactive_grace",
+                        reason=None,
+                        duration_seconds=grace_days * 86400,
+                        expires_at=expires_at,
+                        metadata=grace_metadata,
+                        canonical_event=result.get("canonical_event"),
+                    )
             try:
                 await candidate.member.send(embed=reminder_embed)
                 await self._database.mark_user_reminded(guild_id, str(candidate.member.id), now.isoformat())
@@ -1013,23 +1070,7 @@ class InactiveMembersModerationService:
                         "message_count": candidate.count_in_window,
                     },
                 )
-                if self._member_flow_notifications is not None:
-                    expires_at = now + timedelta(days=int(cfg.get("grace_days_after_reminder", 7)))
-                    await self._member_flow_notifications.log_action(
-                        guild_id=guild_id,
-                        user_id=str(candidate.member.id),
-                        moderator_id=None,
-                        action_type="inactive_grace",
-                        reason=None,
-                        duration_seconds=int(cfg.get("grace_days_after_reminder", 7)) * 86400,
-                        expires_at=expires_at.isoformat(),
-                        metadata={
-                            "source": "inactive_members_moderation",
-                            "greetings_reason": "",
-                            "days_inactive": candidate.days_inactive,
-                            "inactivity_text": inactivity_text,
-                        },
-                    )
+                await _log_grace_event()
                 ok += 1
             except Exception as exc:
                 try:
@@ -1049,6 +1090,7 @@ class InactiveMembersModerationService:
                             "delivery_fallback": "text",
                         },
                     )
+                    await _log_grace_event()
                     ok += 1
                     continue
                 except Exception:
