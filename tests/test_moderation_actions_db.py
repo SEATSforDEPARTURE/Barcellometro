@@ -106,7 +106,13 @@ def test_inactivity_config_template_aliases_are_normalized(tmp_path) -> None:
         await db.connect()
         await db.initialize_schema()
 
-        await db.upsert_inactivity_config("1", template_grace="Grace {user}", template_tempban="Tempban {user}")
+        await db.upsert_inactivity_config(
+            "1",
+            template_grace="Grace {user}",
+            template_tempban="Tempban {user}",
+            template_roleregress="Role regress {old_role}->{new_role}",
+            template_roleregress_embed_color="#123456",
+        )
         cfg = await db.get_inactivity_config("1")
 
         assert cfg is not None
@@ -114,6 +120,8 @@ def test_inactivity_config_template_aliases_are_normalized(tmp_path) -> None:
         assert cfg["dm_reminder_template"] == "Grace {user}"
         assert cfg["template_tempban"] == "Tempban {user}"
         assert cfg["dm_kick_template"] == "Tempban {user}"
+        assert cfg["template_roleregress"] == "Role regress {old_role}->{new_role}"
+        assert cfg["template_roleregress_embed_color"] == "#123456"
 
         await db.upsert_inactivity_config("1", dm_reminder_template="Legacy reminder", dm_kick_template="Legacy kick")
         cfg = await db.get_inactivity_config("1")

@@ -429,6 +429,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         cfg = await _ensure_cfg(ctx, guild_id)
         template_grace = str(cfg.get("template_grace") or cfg.get("dm_reminder_template") or "")
         template_tempban = str(cfg.get("template_tempban") or cfg.get("dm_kick_template") or "")
+        template_roleregress = str(cfg.get("template_roleregress") or "")
         stats = await ctx.database.get_inactivity_dm_delivery_stats(guild_id)
         recent_rows = await ctx.database.list_inactivity_dm_delivery_events(guild_id, limit=5)
         by_event = stats.get("by_event") or []
@@ -450,6 +451,8 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
                 ("template_grace_embed_color", cfg.get("template_grace_embed_color") or "not set"),
                 ("template_tempban", template_tempban or "not set"),
                 ("template_tempban_embed_color", cfg.get("template_tempban_embed_color") or "not set"),
+                ("template_roleregress", template_roleregress or "not set"),
+                ("template_roleregress_embed_color", cfg.get("template_roleregress_embed_color") or "not set"),
                 ("cooldown", _format_cooldown_label(_resolve_inactivity_cooldown_seconds(cfg))),
                 ("cooldown_seconds", _resolve_inactivity_cooldown_seconds(cfg)),
                 ("cooldown_disabled", "yes" if _resolve_inactivity_cooldown_seconds(cfg) == 0 else "no"),
@@ -529,6 +532,44 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
             return
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_tempban=None, template_tempban_embed_color=None)
         await _send(interaction, subcommand_path="inactivity dms template_tempban_reset", lines=[("result", "reset")], kind="success")
+
+    @dms_group.command(name="template_roleregress_set", description="Set the DM template sent when inactivity role regress is applied.")
+    @app_commands.describe(text=TEMPLATE_HELP, embed_color="Optional embed color (#RRGGBB, RRGGBB, 0xRRGGBB).")
+    async def inactivity_dms_template_roleregress_set(interaction: discord.Interaction, text: str, embed_color: str | None = None) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        parsed_embed_color: str | None = None
+        if embed_color is not None:
+            parsed_embed_color = _normalize_embed_color(embed_color)
+            if parsed_embed_color is None:
+                await _send(interaction, subcommand_path="inactivity dms template_roleregress_set", lines=[("error", "Invalid embed_color. Use #RRGGBB, RRGGBB, or 0xRRGGBB.")], kind="error")
+                return
+        payload = {"template_roleregress": text}
+        if embed_color is not None:
+            payload["template_roleregress_embed_color"] = parsed_embed_color
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **payload)
+        await _send(interaction, subcommand_path="inactivity dms template_roleregress_set", lines=[("result", "updated")], kind="success")
+
+    @dms_group.command(name="template_roleregress_show", description="Show the DM template sent when inactivity role regress is applied.")
+    async def inactivity_dms_template_roleregress_show(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        cfg = await _ensure_cfg(ctx, str(interaction.guild_id))
+        template = str(cfg.get("template_roleregress") or "")
+        preview = _render_template_preview(template) if template else "No custom template configured."
+        await _send(
+            interaction,
+            subcommand_path="inactivity dms template_roleregress_show",
+            lines=[("template", template or "not set"), ("embed_color", cfg.get("template_roleregress_embed_color") or "not set")],
+            sections=[CommandEmbedSection(title="Preview", lines=[preview])],
+        )
+
+    @dms_group.command(name="template_roleregress_reset", description="Reset the DM template sent when inactivity role regress is applied.")
+    async def inactivity_dms_template_roleregress_reset(interaction: discord.Interaction) -> None:
+        if not await _ensure(interaction) or interaction.guild_id is None:
+            return
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), template_roleregress=None, template_roleregress_embed_color=None)
+        await _send(interaction, subcommand_path="inactivity dms template_roleregress_reset", lines=[("result", "reset")], kind="success")
 
     @dms_group.command(name="cooldown_set", description="Set the reminder DM cooldown.")
     @app_commands.describe(quantity="Cooldown quantity.", unit="Cooldown unit.")

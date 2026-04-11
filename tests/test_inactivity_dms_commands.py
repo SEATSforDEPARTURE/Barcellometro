@@ -24,6 +24,8 @@ class _FakeDatabase:
             "dm_kick_template": None,
             "template_grace_embed_color": None,
             "template_tempban_embed_color": None,
+            "template_roleregress": None,
+            "template_roleregress_embed_color": None,
             "check_interval_minutes": 60,
             "role_regress_enabled": 0,
         }
@@ -147,6 +149,8 @@ def test_inactivity_dms_on_off_and_status(inattivi_module, monkeypatch: pytest.M
         assert as_map["template_grace_embed_color"] == "not set"
         assert as_map["template_tempban"] == "not set"
         assert as_map["template_tempban_embed_color"] == "not set"
+        assert as_map["template_roleregress"] == "not set"
+        assert as_map["template_roleregress_embed_color"] == "not set"
         assert as_map["cooldown"] == "2 settimane"
         assert as_map["cooldown_seconds"] == 14 * 86400
         assert as_map["cooldown_disabled"] == "no"
@@ -187,6 +191,9 @@ def test_inactivity_dms_template_commands_are_registered_with_final_surface(inat
         "template_tempban_set",
         "template_tempban_show",
         "template_tempban_reset",
+        "template_roleregress_set",
+        "template_roleregress_show",
+        "template_roleregress_reset",
         "cooldown_set",
         "cooldown_show",
         "cooldown_reset",
@@ -217,14 +224,20 @@ def test_inactivity_dms_template_grace_and_tempban_set_show_reset(inattivi_modul
         await _find_command(inactivity_group, "dms", "template_tempban_set").callback(interaction, "Tempban {user}", "0xABCDEF")
         await _find_command(inactivity_group, "dms", "template_tempban_show").callback(interaction)
         await _find_command(inactivity_group, "dms", "template_tempban_reset").callback(interaction)
+        await _find_command(inactivity_group, "dms", "template_roleregress_set").callback(interaction, "Regress {old_role} -> {new_role}", "#334455")
+        await _find_command(inactivity_group, "dms", "template_roleregress_show").callback(interaction)
+        await _find_command(inactivity_group, "dms", "template_roleregress_reset").callback(interaction)
 
         assert db.config["template_grace"] is None
         assert db.config["template_tempban"] is None
+        assert db.config["template_roleregress"] is None
         assert db.config["template_grace_embed_color"] is None
         assert db.config["template_tempban_embed_color"] is None
+        assert db.config["template_roleregress_embed_color"] is None
         sent_paths = [call.kwargs["subcommand_path"] for call in send_response.await_args_list]
         assert "inactivity dms template_grace_show" in sent_paths
         assert "inactivity dms template_tempban_show" in sent_paths
+        assert "inactivity dms template_roleregress_show" in sent_paths
 
     asyncio.run(_run())
 
@@ -409,6 +422,9 @@ def test_inactivity_dms_docs_inventory_matches_final_contract() -> None:
         "template_tempban_set",
         "template_tempban_show",
         "template_tempban_reset",
+        "template_roleregress_set",
+        "template_roleregress_show",
+        "template_roleregress_reset",
         "cooldown_set",
         "cooldown_show",
         "cooldown_reset",
@@ -429,6 +445,7 @@ def test_command_standards_pin_inactivity_dms_surface_and_legacy_policy() -> Non
     assert "## 10. Contratto canonico `/inactivity dms`" in standards
     assert "/inactivity dms template_grace_set" in standards
     assert "/inactivity dms template_tempban_set" in standards
+    assert "/inactivity dms template_roleregress_set" in standards
     assert "`template_reminder_*`" in standards
     assert "`dm_reminder_template`, `dm_kick_template`" in standards
 

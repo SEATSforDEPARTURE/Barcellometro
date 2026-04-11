@@ -728,6 +728,8 @@ class DatabaseService:
                 template_tempban TEXT NULL,
                 template_grace_embed_color TEXT NULL,
                 template_tempban_embed_color TEXT NULL,
+                template_roleregress TEXT NULL,
+                template_roleregress_embed_color TEXT NULL,
                 atrio_template TEXT NULL,
                 template_inactivity_reason TEXT NULL,
                 template_kick_reason TEXT NULL,
@@ -1037,6 +1039,8 @@ class DatabaseService:
             "template_tempban": "TEXT NULL",
             "template_grace_embed_color": "TEXT NULL",
             "template_tempban_embed_color": "TEXT NULL",
+            "template_roleregress": "TEXT NULL",
+            "template_roleregress_embed_color": "TEXT NULL",
             "reminder_cooldown_seconds": "INTEGER NOT NULL DEFAULT 1209600",
             "check_interval_minutes": "INTEGER NOT NULL DEFAULT 60",
             "role_regress_enabled": "INTEGER NOT NULL DEFAULT 0",
@@ -5459,6 +5463,7 @@ class DatabaseService:
         data["notify_channel_id"] = data.get("notify_channel_id") or data.get("atrio_channel_id")
         data["template_grace"] = data.get("template_grace") or data.get("dm_reminder_template")
         data["template_tempban"] = data.get("template_tempban") or data.get("dm_kick_template")
+        data["template_roleregress"] = data.get("template_roleregress")
         cooldown_seconds = data.get("reminder_cooldown_seconds")
         if cooldown_seconds is None:
             cooldown_seconds = int(data.get("reminder_cooldown_days", 14) or 14) * 86400
@@ -5501,6 +5506,8 @@ class DatabaseService:
             "template_tempban": None,
             "template_grace_embed_color": None,
             "template_tempban_embed_color": None,
+            "template_roleregress": None,
+            "template_roleregress_embed_color": None,
             "atrio_template": None,
             "template_inactivity_reason": None,
             "template_kick_reason": None,
@@ -5538,6 +5545,8 @@ class DatabaseService:
             "template_tempban",
             "template_grace_embed_color",
             "template_tempban_embed_color",
+            "template_roleregress",
+            "template_roleregress_embed_color",
             "atrio_template",
             "template_inactivity_reason",
             "template_kick_reason",

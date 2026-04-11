@@ -234,6 +234,9 @@ La superficie slash canonica del sottosistema `/inactivity dms` è **solo** ques
 - `/inactivity dms template_tempban_set` (parametro: `text`)
 - `/inactivity dms template_tempban_show`
 - `/inactivity dms template_tempban_reset`
+- `/inactivity dms template_roleregress_set` (parametro: `text`)
+- `/inactivity dms template_roleregress_show`
+- `/inactivity dms template_roleregress_reset`
 - `/inactivity dms cooldown_set` (parametri: `quantity`, `unit`)
 - `/inactivity dms cooldown_show`
 - `/inactivity dms cooldown_reset`
