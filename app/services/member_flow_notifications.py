@@ -43,7 +43,7 @@ _NON_VOLUNTARY_DEPARTURE_TYPES = frozenset(_EXPLICIT_DEPARTURE_TYPES)
 # quindi eredita il colore narrativo degli eventi non terminali.
 _GREETINGS_ENTRY_COLOUR = 0xC58C5C
 _GREETINGS_EXIT_COLOUR = 0x6B4423
-_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace"})
+_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace", "inactive_role_regress"})
 _EXIT_LIKE_EVENT_TYPES = frozenset(
     {
         "leave",

@@ -521,7 +521,7 @@ def test_source_contains_author_title_mapping_and_footer_service_name() -> None:
     assert "embed = discord.Embed(" in source
     assert "title=copy.event_label" in source
     assert "description=copy.narrative[:4096]" in source
-    assert '_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace"})' in source
+    assert '_ENTRY_LIKE_EVENT_TYPES = frozenset({"join", "grace", "inactive_grace", "inactive_role_regress"})' in source
     assert '"inactive_tempban",' in source
     assert 'attach_author_meta(' in source
     assert 'canonical_top_level_command="greetings"' in source

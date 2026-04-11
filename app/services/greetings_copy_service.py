@@ -25,6 +25,7 @@ SUPPORTED_GREETINGS_EVENT_TYPES = {
     "inactive_kick",
     "inactive_tempban",
     "inactive_grace",
+    "inactive_role_regress",
 }
 
 _ORDINALS_UPPER_MASCULINE = {
@@ -63,6 +64,7 @@ _EVENT_LABELS = {
     "inactive_kick": ("👢", "ESPULSIONE", "f"),
     "inactive_tempban": ("⌛", "INTERDIZIONE TEMPORANEA", "f"),
     "inactive_grace": ("🕊️", "GRAZIA", "f"),
+    "inactive_role_regress": ("↘️", "REGRESSIONE RUOLO", "f"),
 }
 
 _BARCELLO_ALERTS = {
@@ -156,6 +158,7 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
             "inactive_kick": {"default": ["{mention} viene allontanato da {guild_name} per inattività ({inactivity_text})."]},
             "inactive_tempban": {"default": ["{mention} riceve un ban temporaneo per inattività su {guild_name} per {duration} ({inactivity_text})."]},
             "inactive_grace": {"default": ["{mention} entra in grazia per inattività su {guild_name} per {duration} ({inactivity_text})."]},
+            "inactive_role_regress": {"default": ["{mention} perde il ruolo per inattività e viene retrocesso ({reason})."]},
         }
     },
     "mood_default": "accogliente",
@@ -187,6 +190,7 @@ _DEFAULT_GREETINGS_TRIGGER: dict[str, Any] = {
         "inactive_kick": ["{mention} viene allontanato da {server} per inattività ({inactivity_text})."],
         "inactive_tempban": ["{mention} riceve un ban temporaneo per inattività in {server} per {duration} ({inactivity_text})."],
         "inactive_grace": ["{mention} entra nel periodo di grazia per inattività su {server} per {duration} ({inactivity_text})."],
+        "inactive_role_regress": ["{mention} viene retrocesso di ruolo per inattività ({reason})."],
     },
     "moods": {
         "accogliente": {
@@ -1109,6 +1113,7 @@ def get_greetings_title_parts(event_type_key: str, *, is_auto_inactivity: bool =
         "inactive_tempban": ("⌛", "INTERDIZIONE TEMPORANEA"),
         "grace": ("🕊️", "GRAZIA"),
         "inactive_grace": ("🕊️", "GRAZIA"),
+        "inactive_role_regress": ("↘️", "REGRESSIONE RUOLO"),
     }
     if normalized not in title_map:
         raise ValueError(f"Unsupported greetings event type: {event_type_key}")
