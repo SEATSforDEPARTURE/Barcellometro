@@ -806,3 +806,71 @@ def test_run_auto_inactivity_enforcement_reports_tempban_flag_from_config() -> N
         assert no_tempban["tempban_enabled"] is False
 
     asyncio.run(_run())
+
+
+def test_get_config_defaults_check_interval_minutes_to_sixty_without_persisting() -> None:
+    async def _run() -> None:
+        row = {
+            "enabled": 1,
+            "auto_enabled": 1,
+            "excluded_role_ids_json": "[]",
+            "default_policy_json": '{"inactive_days":30,"window_days":30,"min_messages":1,"mode":"OR"}',
+        }
+        database = SimpleNamespace(get_inactivity_config=AsyncMock(return_value=row))
+        service = InactiveMembersModerationService(database, SimpleNamespace(), member_flow_notifications=None)
+
+        cfg = await service._get_config("1")
+
+        assert cfg is not None
+        assert cfg["check_interval_minutes"] == 60
+        database.get_inactivity_config.assert_awaited_once_with("1")
+
+    asyncio.run(_run())
+
+
+def test_auto_inactivity_loop_uses_default_interval_when_config_missing() -> None:
+    async def _run() -> None:
+        guild = SimpleNamespace(id=1)
+        bot = SimpleNamespace(guilds=[guild], wait_until_ready=AsyncMock())
+        service = InactiveMembersModerationService(SimpleNamespace(), bot, member_flow_notifications=None)
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True})
+        service._auto_inactivity_tick = AsyncMock()
+        slept: list[int] = []
+
+        async def _sleep(seconds: int) -> None:
+            slept.append(seconds)
+            raise asyncio.CancelledError()
+
+        with patch("app.services.inactive_members_moderation.asyncio.sleep", side_effect=_sleep):
+            try:
+                await service._auto_inactivity_loop()
+            except asyncio.CancelledError:
+                pass
+
+        assert slept == [3600]
+
+    asyncio.run(_run())
+
+
+def test_auto_inactivity_loop_uses_custom_interval_minutes_from_config() -> None:
+    async def _run() -> None:
+        guild = SimpleNamespace(id=1)
+        bot = SimpleNamespace(guilds=[guild], wait_until_ready=AsyncMock())
+        service = InactiveMembersModerationService(SimpleNamespace(), bot, member_flow_notifications=None)
+        service._get_config = AsyncMock(return_value={"enabled": True, "auto_enabled": True, "check_interval_minutes": 5})
+        service._auto_inactivity_tick = AsyncMock()
+        slept: list[int] = []
+
+        async def _sleep(seconds: int) -> None:
+            slept.append(seconds)
+            raise asyncio.CancelledError()
+
+        with patch("app.services.inactive_members_moderation.asyncio.sleep", side_effect=_sleep):
+            try:
+                await service._auto_inactivity_loop()
+            except asyncio.CancelledError:
+                pass
+
+        assert slept == [300]
+
+    asyncio.run(_run())
