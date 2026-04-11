@@ -533,6 +533,12 @@ def test_runtime_renderer_outputs_follow_body_standard() -> None:
     assert any("TREND" in f.name for f in activity_embeds[0].fields), (
         "Activity report: la sezione TREND deve essere un field standard, non solo testo in description"
     )
+    assert all("STATO ATTIVITÀ" not in f.name for emb in activity_embeds[:2] for f in emb.fields), (
+        "Activity report: la sezione STATO ATTIVITÀ non deve essere renderizzata come field"
+    )
+    assert all((emb.description or "").startswith("*") and (emb.description or "").endswith("*") for emb in activity_embeds[:2]), (
+        "Activity report: overview e dettaglio canale devono avere description narrativa in corsivo"
+    )
     assert any("STATISTICHE SERVER" in f.name for f in activity_embeds[0].fields), (
         "Activity report: STATISTICHE SERVER deve stare nei fields"
     )

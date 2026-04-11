@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 import discord
 
-from app.renderers.channel_summary import format_window_header
+from app.renderers.channel_summary import (
+    _window_header_to_period_and_range,
+    format_window_header,
+)
 from app.services.author import attach_author_meta
 from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta
@@ -73,6 +77,30 @@ def _truncate_overview_channels(lines: list[str], *, max_chars: int = 1400, max_
     return "\n".join(selected) if selected else "—"
 
 
+def _build_server_activity_description(*, window_header: str, label: str, trend_text: str) -> str:
+    trend_clean = re.sub(r"(?i)\btrend\b[:\s-]*", "", str(trend_text or "stabile")).strip(" .") or "stabile"
+    period_text, range_text = _window_header_to_period_and_range(window_header)
+    period_segment = f"**{period_text}**"
+    if range_text:
+        period_segment += f" ({range_text})"
+    return (
+        f"{period_segment} il server ha mostrato un'attività **{str(label or 'ASSENTE').lower()}**, "
+        f"con un ritmo **{trend_clean.lower()}**."
+    )
+
+
+def _build_channel_activity_description(*, window_header: str, channel_name: str, label: str, trend_text: str) -> str:
+    trend_clean = re.sub(r"(?i)\btrend\b[:\s-]*", "", str(trend_text or "stabile")).strip(" .") or "stabile"
+    period_text, range_text = _window_header_to_period_and_range(window_header)
+    period_segment = f"**{period_text}**"
+    if range_text:
+        period_segment += f" ({range_text})"
+    return (
+        f"{period_segment} {channel_name} ha mostrato un'attività **{str(label or 'ASSENTE').lower()}**, "
+        f"con un ritmo **{trend_clean.lower()}**."
+    )
+
+
 def build_daily_activity_embeds(
     guild: discord.Guild,
     guild_name: str,
@@ -119,14 +147,12 @@ def build_daily_activity_embeds(
     overview = discord.Embed(
         title=format_standard_title(f"RESOCONTO SERVER “{guild_name}”", emoji="🗣️"),
         color=_color_for_emoji(emoji),
-        description=format_standard_description("Quadro generale dell'attività server nel periodo richiesto.", italic=False),
+        description=format_standard_description(
+            _build_server_activity_description(window_header=window_header, label=label, trend_text=trend),
+            italic=True,
+        ),
     )
     overview.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=_truncate_field(window_header), inline=False)
-    overview.add_field(
-        name=format_standard_field_name("Stato attività", emoji=emoji),
-        value=_truncate_field(f"**ATTIVITÀ {label}**\nRitmo del server valutato su volume, persone attive e continuità."),
-        inline=False,
-    )
     overview.add_field(
         name=format_standard_field_name("Punti attività server", emoji="🫀"),
         value=_truncate_field(f"{_bar(score, emoji)} **({score}/100)**"),
@@ -178,12 +204,15 @@ def build_daily_activity_embeds(
         embed = discord.Embed(
             title=format_standard_title(f"DETTAGLI ATTIVITÀ “#{getattr(dc, 'name', 'sconosciuto')}”", emoji="📄"),
             color=_color_for_emoji(s.emoji),
-            description=format_standard_description("Dettagli operativi del canale per la finestra analizzata.", italic=False),
-        )
-        embed.add_field(
-            name=format_standard_field_name("Stato attività", emoji=s.emoji),
-            value=_truncate_field(f"**ATTIVITÀ {s.label}**\nRitmo del canale valutato su volume, persone attive e continuità."),
-            inline=False,
+            description=format_standard_description(
+                _build_channel_activity_description(
+                    window_header=window_header,
+                    channel_name=_fmt_channel_name(dc),
+                    label=s.label,
+                    trend_text=s.trend_text or "stabile",
+                ),
+                italic=True,
+            ),
         )
         embed.add_field(
             name=format_standard_field_name("Punti attività", emoji="🫀"),

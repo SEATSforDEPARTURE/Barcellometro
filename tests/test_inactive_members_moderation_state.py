@@ -69,6 +69,7 @@ if "discord" not in sys.modules:
 
 from app.services.inactive_members_moderation import _state_int
 from app.services.inactive_members_moderation import InactiveCandidate, InactiveMembersModerationService
+from app.shared.discord.embed_body import format_standard_field_name
 
 
 class _FakeRow:
@@ -501,3 +502,70 @@ def test_inactivity_template_render_drops_unresolved_placeholders_and_supports_r
     assert "***<@42>***" in rendered
     assert "***tempban***" in rendered
     assert rendered.count("*") % 2 == 0
+
+
+def test_build_serverwide_inactive_embeds_uses_intro_description_and_chunked_fields() -> None:
+    async def _run() -> None:
+        members = [
+            SimpleNamespace(id=100 + idx, mention=f"<@{100 + idx}>", display_name=f"Dormiente {idx}", name=f"user{idx}")
+            for idx in range(1, 41)
+        ]
+        inactive = [
+            InactiveCandidate(
+                member=member,
+                last_message_ts=(datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+                last_channel_id=None,
+                last_message_id=None,
+                count_in_window=0,
+                days_inactive=40,
+                policy={"inactive_days": 30, "window_days": 30, "min_messages": 1, "mode": "OR"},
+            )
+            for member in members
+        ]
+        guild = SimpleNamespace(id=1, name="Barcellometro")
+        database = SimpleNamespace(
+            list_inactivity_role_policies=AsyncMock(return_value=[]),
+            fetch_inactivity_user_states=AsyncMock(return_value={}),
+        )
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+
+        embeds, txt_file, _ = await service.build_serverwide_inactive_embeds(
+            "1",
+            "2",
+            inactive=inactive,
+            cfg={"default_policy": {}, "grace_days_after_reminder": 7},
+            considered=120,
+            include_actions_view=False,
+        )
+
+        assert embeds
+        assert txt_file is not None
+        first = embeds[0]
+        assert first.title == "✏️ __**INATTIVI (SERVER-WIDE)**__"
+        assert first.description.startswith("*") and first.description.endswith("*")
+        assert "Panoramica dei membri inattivi" in first.description
+        first_names = [field.name for field in first.fields]
+        assert format_standard_field_name("MEMBRI ANALIZZATI") in first_names
+        assert format_standard_field_name("INATTIVI TROVATI") in first_names
+        assert format_standard_field_name("STATO REMINDER") in first_names
+        assert format_standard_field_name("INATTIVI", emoji="✏️") in first_names
+        assert all("Dormiente" not in (embed.description or "") for embed in embeds)
+        merged_field_names = [field.name for embed in embeds for field in embed.fields]
+        assert format_standard_field_name("INATTIVI (CONT.)", emoji="✏️") in merged_field_names
+
+    asyncio.run(_run())
+
+
+def test_build_action_embed_moves_main_content_to_dedicated_details_field() -> None:
+    service = InactiveMembersModerationService(SimpleNamespace(), SimpleNamespace(), member_flow_notifications=None)
+    embed = service.build_action_embed(
+        "🤖 Auto inattivi completata",
+        {"dm_ok": 2, "dm_fail": 1, "kick_ok": 3, "kick_fail": 0, "ban_ok": 1, "ban_fail": 0, "notify_ok": 4, "errors": ["timeout"]},
+    )
+
+    assert embed.description.startswith("*") and embed.description.endswith("*")
+    assert "riepilogo finale" in embed.description.lower()
+    assert "DM success/fail" not in embed.description
+    detail_field = next(field for field in embed.fields if field.name == format_standard_field_name("DETTAGLI", emoji="📌"))
+    assert "• DM success/fail: **2/1**" in detail_field.value
+    assert "• Errori: timeout" in detail_field.value
