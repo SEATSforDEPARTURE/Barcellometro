@@ -77,28 +77,33 @@ def _truncate_overview_channels(lines: list[str], *, max_chars: int = 1400, max_
     return "\n".join(selected) if selected else "—"
 
 
-def _build_server_activity_description(*, window_header: str, label: str, trend_text: str) -> str:
-    trend_clean = re.sub(r"(?i)\btrend\b[:\s-]*", "", str(trend_text or "stabile")).strip(" .") or "stabile"
+def _format_trend_field_value(trend_text: str | None) -> str:
+    base = str(trend_text or "n/d").strip() or "n/d"
+    normalized = re.sub(r"(?i)\btrend\b[:\s-]*", "Trend ", base, count=1).strip()
+    if normalized and normalized[0].islower():
+        normalized = normalized[0].upper() + normalized[1:]
+
+    keyword_pattern = re.compile(r"\b(crescita|crescente|calo|stabile|diminuzione|aumento|in aumento|in calo)\b", re.IGNORECASE)
+    normalized = keyword_pattern.sub(lambda m: f"**{m.group(0)}**", normalized)
+    normalized = re.sub(r"\(([+-]?\d+(?:[.,]\d+)?%)", r"(**\1**", normalized)
+    normalized = re.sub(r"\(([+-]?\d+(?:[.,]\d+)?)", r"(**\1**", normalized)
+    return normalized
+
+
+def _build_server_activity_description(*, window_header: str, label: str) -> str:
     period_text, range_text = _window_header_to_period_and_range(window_header)
     period_segment = f"**{period_text}**"
     if range_text:
         period_segment += f" ({range_text})"
-    return (
-        f"{period_segment} il server ha mostrato un'attività **{str(label or 'ASSENTE').lower()}**, "
-        f"con un ritmo **{trend_clean.lower()}**."
-    )
+    return f"{period_segment} il server ha mostrato un'attività **{str(label or 'ASSENTE').lower()}**."
 
 
-def _build_channel_activity_description(*, window_header: str, channel_name: str, label: str, trend_text: str) -> str:
-    trend_clean = re.sub(r"(?i)\btrend\b[:\s-]*", "", str(trend_text or "stabile")).strip(" .") or "stabile"
+def _build_channel_activity_description(*, window_header: str, channel_name: str, label: str) -> str:
     period_text, range_text = _window_header_to_period_and_range(window_header)
     period_segment = f"**{period_text}**"
     if range_text:
         period_segment += f" ({range_text})"
-    return (
-        f"{period_segment} {channel_name} ha mostrato un'attività **{str(label or 'ASSENTE').lower()}**, "
-        f"con un ritmo **{trend_clean.lower()}**."
-    )
+    return f"{period_segment} {channel_name} ha mostrato un'attività **{str(label or 'ASSENTE').lower()}**."
 
 
 def build_daily_activity_embeds(
@@ -148,11 +153,10 @@ def build_daily_activity_embeds(
         title=format_standard_title(f"RESOCONTO SERVER “{guild_name}”", emoji="🗣️"),
         color=_color_for_emoji(emoji),
         description=format_standard_description(
-            _build_server_activity_description(window_header=window_header, label=label, trend_text=trend),
+            _build_server_activity_description(window_header=window_header, label=label),
             italic=True,
         ),
     )
-    overview.add_field(name=format_standard_field_name("Periodo", emoji="🕒"), value=_truncate_field(window_header), inline=False)
     overview.add_field(
         name=format_standard_field_name("Punti attività server", emoji="🫀"),
         value=_truncate_field(f"{_bar(score, emoji)} **({score}/100)**"),
@@ -163,7 +167,7 @@ def build_daily_activity_embeds(
         value=_truncate_field(_truncate_overview_channels(channel_score_lines)),
         inline=False,
     )
-    overview.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(trend), inline=False)
+    overview.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(_format_trend_field_value(trend)), inline=False)
     overview.add_field(
         name=format_standard_field_name("Statistiche server", emoji="📌"),
         value=_truncate_field(
@@ -209,7 +213,6 @@ def build_daily_activity_embeds(
                     window_header=window_header,
                     channel_name=_fmt_channel_name(dc),
                     label=s.label,
-                    trend_text=s.trend_text or "stabile",
                 ),
                 italic=True,
             ),
@@ -219,7 +222,11 @@ def build_daily_activity_embeds(
             value=_truncate_field(f"{_bar(s.score, s.emoji)} **({s.score}/100)**"),
             inline=False,
         )
-        embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=_truncate_field(s.trend_text or "n/d"), inline=False)
+        embed.add_field(
+            name=format_standard_field_name("Trend", emoji="📈"),
+            value=_truncate_field(_format_trend_field_value(s.trend_text)),
+            inline=False,
+        )
         embed.add_field(name=format_standard_field_name("Statistiche canale", emoji="📌"), value=_truncate_field("\n".join(stats_lines)), inline=False)
         attach_footer_meta(embed, service_name="daily_activity_report", used_local_processing=True)
         attach_author_meta(embed, service_name="daily_activity_report", canonical_top_level_command="serversummary")

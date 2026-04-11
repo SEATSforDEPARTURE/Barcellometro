@@ -89,12 +89,17 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
         window_end_dt=datetime(2026, 2, 20, 10, 0),
     )
 
-    period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
-    assert "🗓️ Oggi. Venerdì, 20 Febbraio 2026" in period_field
     first_names = [f.name for f in embeds[0].fields]
+    assert format_standard_field_name("PERIODO", emoji="🕒") not in first_names
     assert format_standard_field_name("TREND", emoji="📈") in first_names
     assert format_standard_field_name("STATISTICHE SERVER", emoji="📌") in first_names
     assert "📈 **TREND**" not in (embeds[0].description or "")
+    assert "in crescita" not in (embeds[0].description or "").lower()
+    assert "in calo" not in (embeds[0].description or "").lower()
+    assert "stabile rispetto" not in (embeds[0].description or "").lower()
+    assert "Messaggi in **crescita** (**+40%** vs finestra precedente)." in next(
+        f.value for f in embeds[0].fields if f.name == format_standard_field_name("TREND", emoji="📈")
+    )
     stats_server = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("STATISTICHE SERVER", emoji="📌"))
     assert "Ora di silenzio generale" in stats_server
     assert "Utenti attivi: **3/12 (25%)**" in stats_server
@@ -104,6 +109,13 @@ def test_daily_renderer_embeds_include_silence_overview_channels_and_ordered_fie
     channel_field_names = [f.name for f in embeds[1].fields]
     assert format_standard_field_name("TREND", emoji="📈") in channel_field_names
     assert format_standard_field_name("STATISTICHE CANALE", emoji="📌") in channel_field_names
+    channel_desc = embeds[1].description or ""
+    assert "in crescita" not in channel_desc.lower()
+    assert "in calo" not in channel_desc.lower()
+    assert "stabile rispetto" not in channel_desc.lower()
+    trend_field_channel = next(f.value for f in embeds[1].fields if f.name == format_standard_field_name("TREND", emoji="📈"))
+    assert "**" in trend_field_channel
+    assert "Messaggi in **crescita** (**+96%** vs finestra precedente)." in trend_field_channel
 
 
 def test_daily_renderer_txt_contains_required_headers_and_silence(renderer_module) -> None:
@@ -160,9 +172,9 @@ def test_daily_renderer_embeds_use_ultimi_window_header(renderer_module) -> None
         window_end_dt=datetime(2026, 3, 16, 15, 19),
     )
 
-    period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
-    assert "🗓️ Ultime 20 ore" in period_field
-    assert "15/03/2026 19:19 → 16/03/2026 15:19" in period_field
+    description = embeds[0].description or ""
+    assert "**Nelle ultime 20 ore**" in description
+    assert "15/03/2026 19:19 → 16/03/2026 15:19" in description
 
 
 def test_daily_renderer_embeds_use_range_window_header(renderer_module) -> None:
@@ -189,8 +201,9 @@ def test_daily_renderer_embeds_use_range_window_header(renderer_module) -> None:
         window_end_dt=datetime(2026, 3, 12, 1, 0),
     )
 
-    period_field = next(f.value for f in embeds[0].fields if f.name == format_standard_field_name("PERIODO", emoji="🕒"))
-    assert "🗓️ 10/03/2026 00:00 → 12/03/2026 01:00" in period_field
+    description = embeds[0].description or ""
+    assert "**Periodo selezionato**" in description
+    assert "10/03/2026 00:00 → 12/03/2026 01:00" in description
 
 
 def test_daily_renderer_removes_stato_attivita_field_and_uses_narrative_italic_description(renderer_module) -> None:
@@ -220,6 +233,7 @@ def test_daily_renderer_removes_stato_attivita_field_and_uses_narrative_italic_d
     assert overview.description and overview.description.startswith("*") and overview.description.endswith("*")
     assert "**Ieri. Venerdì, 10 Aprile 2026**" in overview.description
     assert "attività **intensa**" in overview.description
+    assert "in crescita" not in overview.description.lower()
 
     channel = embeds[1]
     channel_names = [field.name for field in channel.fields]
@@ -227,3 +241,4 @@ def test_daily_renderer_removes_stato_attivita_field_and_uses_narrative_italic_d
     assert channel.description and channel.description.startswith("*") and channel.description.endswith("*")
     assert "**Ieri. Venerdì, 10 Aprile 2026**" in channel.description
     assert "#general ha mostrato un'attività **intensa**" in channel.description
+    assert "in crescita" not in channel.description.lower()
