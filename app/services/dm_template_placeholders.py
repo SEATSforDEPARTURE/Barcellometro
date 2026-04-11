@@ -69,6 +69,8 @@ _DM_IMPORTANT_PLACEHOLDERS: frozenset[str] = frozenset(
         "inactivity_text",
         "event_state",
         "event_cause",
+        "old_role",
+        "new_role",
     }
 )
 

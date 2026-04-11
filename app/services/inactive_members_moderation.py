@@ -35,6 +35,7 @@ USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 MAX_FIELDS_PER_EMBED = 24
 INACTIVE_GRACE_TITLE_EMOJI, INACTIVE_GRACE_TITLE_TEXT = get_greetings_title_parts("inactive_grace")
 INACTIVE_TEMPBAN_TITLE_EMOJI, INACTIVE_TEMPBAN_TITLE_TEXT = get_greetings_title_parts("inactive_tempban")
+INACTIVE_ROLEREGRESS_TITLE_EMOJI, INACTIVE_ROLEREGRESS_TITLE_TEXT = get_greetings_title_parts("inactive_role_regress")
 DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES = 60
 AUTO_INACTIVITY_MIN_COOLDOWN_SECONDS = 45
 
@@ -562,7 +563,7 @@ class InactiveMembersModerationService:
         return self._is_inactive(days_inactive=days, count_in_window=count, policy=policy), days, count
 
     async def apply_role_regress(
-        self, guild: discord.Guild, member: discord.Member, policy: dict[str, Any], *, days_inactive: int, message_count: int
+        self, guild: discord.Guild, member: discord.Member, policy: dict[str, Any], cfg: dict[str, Any], *, days_inactive: int, message_count: int
     ) -> tuple[bool, str | None]:
         from_role = guild.get_role(int(policy["role_to_regress"]))
         to_role = guild.get_role(int(policy["role_after_regress"]))
@@ -593,6 +594,103 @@ class InactiveMembersModerationService:
             from_role.id,
             to_role.id,
         )
+        now = datetime.now(timezone.utc)
+        inactivity_text = f"è stato inattivo per {days_inactive} giorni"
+        template = (
+            cfg.get("template_roleregress")
+            or "Ciao {user}, per inattività è stato applicato un role regress su {server}: {old_role} → {new_role}. "
+            "Dettagli policy: inattività {days_inactive}g, finestra {window_days}g, min messaggi {min_messages}."
+        )
+        role_regress_dm = self._render_template(
+            template,
+            member=member,
+            guild=guild,
+            event_type="inactive_role_regress",
+            days_inactive=days_inactive,
+            policy=policy,
+            cfg=cfg,
+            message_count=message_count,
+            reminder_count=0,
+            reason=f"Inattività: {from_role.name} → {to_role.name}",
+            reasoning="inactivity_role_regress",
+            inactivity_text=inactivity_text,
+            event_state="role_regressed",
+            event_cause="inactivity",
+            duration_seconds=None,
+            now=now,
+            started_at=now,
+            expires_at=None,
+            old_role=from_role.name,
+            new_role=to_role.name,
+        )
+        can_send_dm = hasattr(member, "send")
+        log_delivery = getattr(self._database, "log_inactivity_dm_delivery", None)
+        try:
+            if can_send_dm:
+                role_regress_embed = await build_standard_dm_embed(
+                    service_name="inactivity",
+                    canonical_top_level_command="inattivi",
+                    title=INACTIVE_ROLEREGRESS_TITLE_TEXT,
+                    title_emoji=INACTIVE_ROLEREGRESS_TITLE_EMOJI,
+                    description=role_regress_dm,
+                    color=self._resolve_inactivity_dm_color(cfg.get("template_roleregress_embed_color"), discord.Colour.blurple()),
+                )
+                await member.send(embed=role_regress_embed)
+            if log_delivery is not None:
+                await log_delivery(
+                    guild_id=str(guild.id),
+                    user_id=str(member.id),
+                    event_type="inactive_role_regress",
+                    reason=f"Inattività: {from_role.name} → {to_role.name}",
+                    sent_at=now.isoformat(),
+                    outcome="success",
+                    metadata={
+                        "source": "inactive_members_moderation",
+                        "days_inactive": days_inactive,
+                        "message_count": message_count,
+                        "from_role_id": str(from_role.id),
+                        "to_role_id": str(to_role.id),
+                    },
+                )
+        except Exception as exc:
+            try:
+                if can_send_dm:
+                    await member.send(role_regress_dm)
+                if log_delivery is not None:
+                    await log_delivery(
+                        guild_id=str(guild.id),
+                        user_id=str(member.id),
+                        event_type="inactive_role_regress",
+                        reason=f"Inattività: {from_role.name} → {to_role.name}",
+                        sent_at=now.isoformat(),
+                        outcome="success",
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": days_inactive,
+                            "message_count": message_count,
+                            "from_role_id": str(from_role.id),
+                            "to_role_id": str(to_role.id),
+                            "delivery_fallback": "text",
+                        },
+                    )
+            except Exception:
+                if log_delivery is not None:
+                    await log_delivery(
+                        guild_id=str(guild.id),
+                        user_id=str(member.id),
+                        event_type="inactive_role_regress",
+                        reason=f"Inattività: {from_role.name} → {to_role.name}",
+                        sent_at=now.isoformat(),
+                        outcome="fail",
+                        error_summary=exc.__class__.__name__,
+                        metadata={
+                            "source": "inactive_members_moderation",
+                            "days_inactive": days_inactive,
+                            "message_count": message_count,
+                            "from_role_id": str(from_role.id),
+                            "to_role_id": str(to_role.id),
+                        },
+                    )
         if self._member_flow_notifications is not None:
             result = await self._member_flow_notifications.log_action(
                 guild_id=str(guild.id),
@@ -659,7 +757,7 @@ class InactiveMembersModerationService:
             if not violates:
                 stats["skipped"] += 1
                 continue
-            ok, _ = await self.apply_role_regress(guild, member, policy, days_inactive=days, message_count=count)
+            ok, _ = await self.apply_role_regress(guild, member, policy, cfg, days_inactive=days, message_count=count)
             if ok:
                 processed_user_ids.add(member.id)
                 stats["applied"] += 1
@@ -1111,6 +1209,8 @@ class InactiveMembersModerationService:
         now: datetime | None = None,
         started_at: datetime | None = None,
         expires_at: datetime | None = None,
+        old_role: str | None = None,
+        new_role: str | None = None,
     ) -> str:
         base = template or ""
         payload = build_inactivity_dm_template_payload(
@@ -1131,6 +1231,8 @@ class InactiveMembersModerationService:
             now=now,
             started_at=started_at,
             expires_at=expires_at,
+            old_role=old_role,
+            new_role=new_role,
         )
         return render_dm_template(base, payload)
 

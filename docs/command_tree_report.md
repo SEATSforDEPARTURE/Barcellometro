@@ -207,6 +207,9 @@ Questo report inventaria i comandi realmente registrati nel repository. Per il v
 | `inactivity` | `dms` | `template_tempban_reset` | Reset the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:525` |
 | `inactivity` | `dms` | `template_tempban_set` | Set the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:495` |
 | `inactivity` | `dms` | `template_tempban_show` | Show the DM template sent before automatic inactivity tempban. | `app/plugins/commands_modular/inattivi.py:511` |
+| `inactivity` | `dms` | `template_roleregress_reset` | Reset the DM template sent when inactivity role regress is applied. | `app/plugins/commands_modular/inattivi.py:561` |
+| `inactivity` | `dms` | `template_roleregress_set` | Set the DM template sent when inactivity role regress is applied. | `app/plugins/commands_modular/inattivi.py:531` |
+| `inactivity` | `dms` | `template_roleregress_show` | Show the DM template sent when inactivity role regress is applied. | `app/plugins/commands_modular/inattivi.py:547` |
 | `inactivity` | `grace` | `limits_reset` | Reset the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:338` |
 | `inactivity` | `grace` | `limits_set` | Set the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:323` |
 | `inactivity` | `grace` | `limits_show` | Show the inactivity grace period limits. | `app/plugins/commands_modular/inattivi.py:330` |

@@ -327,6 +327,7 @@ def test_apply_role_regress_removes_old_role_and_adds_new_role() -> None:
             guild,
             member,
             {"role_to_regress": "10", "role_after_regress": "11"},
+            {"template_roleregress": "Regress {old_role} -> {new_role}", "template_roleregress_embed_color": "#112233"},
             days_inactive=8,
             message_count=0,
         )
@@ -336,6 +337,73 @@ def test_apply_role_regress_removes_old_role_and_adds_new_role() -> None:
         edited_roles = member.edit.await_args.kwargs["roles"]
         assert old_role not in edited_roles
         assert new_role in edited_roles
+
+    asyncio.run(_run())
+
+
+def test_apply_role_regress_sends_custom_inactivity_dm_template() -> None:
+    async def _run() -> None:
+        old_role = SimpleNamespace(id=10, name="CRICETINE")
+        new_role = SimpleNamespace(id=11, name="POLLE")
+        member = SimpleNamespace(id=42, roles=[old_role], edit=AsyncMock(), mention="<@42>", send=AsyncMock())
+        guild = SimpleNamespace(
+            id=1,
+            name="Barcellometro",
+            get_role=lambda role_id: old_role if role_id == 10 else new_role if role_id == 11 else None,
+        )
+        database = SimpleNamespace(log_inactivity_dm_delivery=AsyncMock())
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+
+        ok, error = await service.apply_role_regress(
+            guild,
+            member,
+            {"role_to_regress": "10", "role_after_regress": "11", "window_days": 21, "min_messages": 2},
+            {"template_roleregress": "Regress {old_role}->{new_role} per {days_inactive} giorni", "template_roleregress_embed_color": "#334455"},
+            days_inactive=14,
+            message_count=0,
+        )
+
+        assert ok is True
+        assert error is None
+        sent_embed = member.send.await_args.kwargs["embed"]
+        assert "Regress ***CRICETINE***->***POLLE*** per ***14*** giorni" in str(sent_embed.description)
+        assert sent_embed.title == "↘️ __**REGRESSIONE RUOLO**__"
+        assert sent_embed.author.name == "servizio INACTIVITY"
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "inactive_role_regress"
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["outcome"] == "success"
+
+    asyncio.run(_run())
+
+
+def test_apply_role_regress_uses_default_template_when_custom_missing() -> None:
+    async def _run() -> None:
+        old_role = SimpleNamespace(id=10, name="CRICETINE")
+        new_role = SimpleNamespace(id=11, name="POLLE")
+        member = SimpleNamespace(id=42, roles=[old_role], edit=AsyncMock(), mention="<@42>", send=AsyncMock())
+        guild = SimpleNamespace(
+            id=1,
+            name="Barcellometro",
+            get_role=lambda role_id: old_role if role_id == 10 else new_role if role_id == 11 else None,
+        )
+        database = SimpleNamespace(log_inactivity_dm_delivery=AsyncMock())
+        service = InactiveMembersModerationService(database, SimpleNamespace(get_guild=lambda guild_id: guild), member_flow_notifications=None)
+
+        ok, error = await service.apply_role_regress(
+            guild,
+            member,
+            {"role_to_regress": "10", "role_after_regress": "11", "window_days": 30, "min_messages": 1},
+            {},
+            days_inactive=9,
+            message_count=0,
+        )
+
+        assert ok is True
+        assert error is None
+        sent_embed = member.send.await_args.kwargs["embed"]
+        assert "CRICETINE" in str(sent_embed.description)
+        assert "POLLE" in str(sent_embed.description)
+        assert "finestra ***30***g" in str(sent_embed.description)
+        assert database.log_inactivity_dm_delivery.await_args.kwargs["event_type"] == "inactive_role_regress"
 
     asyncio.run(_run())
 

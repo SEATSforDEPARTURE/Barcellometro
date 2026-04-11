@@ -20,6 +20,8 @@ INACTIVITY_DM_SUPPORTED_PLACEHOLDERS: tuple[str, ...] = (
     "inactivity_text",
     "event_state",
     "event_cause",
+    "old_role",
+    "new_role",
 )
 
 
@@ -42,6 +44,8 @@ def build_inactivity_dm_template_payload(
     now: datetime | None = None,
     started_at: datetime | None = None,
     expires_at: datetime | None = None,
+    old_role: str | None = None,
+    new_role: str | None = None,
 ) -> dict[str, Any]:
     utc_now = now or datetime.now(timezone.utc)
     safe_event_type = str(event_type or "").strip() or "inactivity"
@@ -73,4 +77,6 @@ def build_inactivity_dm_template_payload(
         "inactivity_text": inactivity_text or f"è stato inattivo per {days_inactive} giorni",
         "event_state": str(event_state or ""),
         "event_cause": str(event_cause or ""),
+        "old_role": str(old_role or ""),
+        "new_role": str(new_role or ""),
     }
