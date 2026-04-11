@@ -950,21 +950,6 @@ class InactiveMembersModerationService:
                 has_post_reminder_activity = latest_activity is not None and latest_activity > reminder_at
                 if not has_post_reminder_activity:
                     skipped += 1
-                    await self._database.log_inactivity_dm_delivery(
-                        guild_id=guild_id,
-                        user_id=str(candidate.member.id),
-                        event_type="grace",
-                        reason="already_in_grace",
-                        sent_at=now.isoformat(),
-                        outcome="skipped",
-                        error_summary="already_in_grace",
-                        metadata={
-                            "source": "inactive_members_moderation",
-                            "days_inactive": candidate.days_inactive,
-                            "message_count": candidate.count_in_window,
-                            "grace_days": grace_days,
-                        },
-                    )
                     continue
 
             latest_delivery = await self._latest_grace_dm_delivery(guild_id, str(candidate.member.id))
@@ -975,21 +960,6 @@ class InactiveMembersModerationService:
                         raise ValueError("invalid sent_at")
                     if cooldown_seconds > 0 and now - last_sent < timedelta(seconds=cooldown_seconds):
                         skipped += 1
-                        await self._database.log_inactivity_dm_delivery(
-                            guild_id=guild_id,
-                            user_id=str(candidate.member.id),
-                            event_type="grace",
-                            reason="cooldown",
-                            sent_at=now.isoformat(),
-                            outcome="skipped",
-                            error_summary="cooldown",
-                            metadata={
-                                "source": "inactive_members_moderation",
-                                "days_inactive": candidate.days_inactive,
-                                "message_count": candidate.count_in_window,
-                                "cooldown_seconds": cooldown_seconds,
-                            },
-                        )
                         continue
                 except Exception:
                     logger.debug("inactive reminder cooldown parse failed", exc_info=True)
