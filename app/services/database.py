@@ -713,6 +713,7 @@ class DatabaseService:
                 grace_days_after_reminder INTEGER NOT NULL DEFAULT 7,
                 reminder_cooldown_days INTEGER NOT NULL DEFAULT 14,
                 reminder_cooldown_seconds INTEGER NOT NULL DEFAULT 1209600,
+                check_interval_minutes INTEGER NOT NULL DEFAULT 60,
                 ban_days INTEGER NOT NULL DEFAULT 7,
                 atrio_channel_id TEXT NULL,
                 notify_channel_id TEXT NULL,
@@ -1026,6 +1027,7 @@ class DatabaseService:
             "template_grace_embed_color": "TEXT NULL",
             "template_tempban_embed_color": "TEXT NULL",
             "reminder_cooldown_seconds": "INTEGER NOT NULL DEFAULT 1209600",
+            "check_interval_minutes": "INTEGER NOT NULL DEFAULT 60",
         }
         for name, col_def in missing.items():
             if name not in existing:

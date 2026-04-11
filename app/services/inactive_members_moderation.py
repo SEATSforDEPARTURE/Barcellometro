@@ -35,7 +35,7 @@ USERS_GRACE_TEMPBAN_DEFAULT_SECONDS = 0
 MAX_FIELDS_PER_EMBED = 24
 INACTIVE_GRACE_TITLE_EMOJI, INACTIVE_GRACE_TITLE_TEXT = get_greetings_title_parts("inactive_grace")
 INACTIVE_TEMPBAN_TITLE_EMOJI, INACTIVE_TEMPBAN_TITLE_TEXT = get_greetings_title_parts("inactive_tempban")
-AUTO_INACTIVITY_LOOP_INTERVAL_SECONDS = 60
+DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES = 60
 AUTO_INACTIVITY_MIN_COOLDOWN_SECONDS = 45
 
 
@@ -215,6 +215,7 @@ class InactiveMembersModerationService:
         self._auto_inactivity_task: asyncio.Task[None] | None = None
         self._auto_running_guild_ids: set[str] = set()
         self._auto_last_run_at: dict[str, datetime] = {}
+        self._auto_last_interval_minutes: int | None = None
 
     def start(self) -> None:
         if self._unban_task is None:
@@ -251,13 +252,26 @@ class InactiveMembersModerationService:
 
     async def _auto_inactivity_loop(self) -> None:
         await self._bot.wait_until_ready()
-        logger.info("inactive moderation: autonomous inactivity enforcement loop started (interval=%ss)", AUTO_INACTIVITY_LOOP_INTERVAL_SECONDS)
+        logger.info(
+            "inactive moderation: autonomous inactivity enforcement loop started (interval=%sm)",
+            DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES,
+        )
         while True:
+            interval_minutes = DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES
             try:
+                guilds = list(getattr(self._bot, "guilds", []) or [])
+                if guilds:
+                    first_guild_id = str(getattr(guilds[0], "id", "") or "")
+                    if first_guild_id:
+                        cfg = await self._get_config(first_guild_id)
+                        interval_minutes = int(cfg.get("check_interval_minutes", DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES)) if cfg else DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES
+                if self._auto_last_interval_minutes != interval_minutes:
+                    logger.info("inactive moderation: autonomous inactivity enforcement interval updated to %sm", interval_minutes)
+                    self._auto_last_interval_minutes = interval_minutes
                 await self._auto_inactivity_tick()
             except Exception:
                 logger.exception("inactive moderation auto inactivity tick failed")
-            await asyncio.sleep(AUTO_INACTIVITY_LOOP_INTERVAL_SECONDS)
+            await asyncio.sleep(interval_minutes * 60)
 
     async def _auto_inactivity_tick(self) -> None:
         guilds = list(getattr(self._bot, "guilds", []) or [])
@@ -449,6 +463,11 @@ class InactiveMembersModerationService:
         data = dict(row)
         data["excluded_role_ids"] = self._parse_json_list(data.get("excluded_role_ids_json"))
         data["default_policy"] = self._parse_policy_json(data.get("default_policy_json"))
+        try:
+            interval_minutes = int(data.get("check_interval_minutes", DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES) or DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES)
+        except Exception:
+            interval_minutes = DEFAULT_AUTO_INACTIVITY_CHECK_INTERVAL_MINUTES
+        data["check_interval_minutes"] = min(1440, max(1, interval_minutes))
         return data
 
     @staticmethod

@@ -24,6 +24,7 @@ class _FakeDatabase:
             "dm_kick_template": None,
             "template_grace_embed_color": None,
             "template_tempban_embed_color": None,
+            "check_interval_minutes": 60,
         }
         self.set_dm_enabled_calls: list[tuple[str, bool]] = []
         self.stats_payload = {
@@ -255,6 +256,52 @@ def test_inactivity_dms_cooldown_set_supports_all_units_and_disable(inattivi_mod
         reset_map = {key: value for key, value in reset_call.kwargs["lines"]}
         assert reset_map["cooldown_seconds"] == 0
         assert reset_map["cooldown_disabled"] == "yes"
+
+    asyncio.run(_run())
+
+
+def test_inactivity_policy_default_set_check_interval_validation(inattivi_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        send_response = AsyncMock()
+        monkeypatch.setattr(inattivi_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(inattivi_module, "send_standard_response", send_response)
+
+        ctx = SimpleNamespace(database=db, footer=None, author=None)
+        inactivity_group = discord.app_commands.Group(name="inactivity", description="inactivity")
+        inattivi_module.register_inattivi(inactivity_group, ctx)
+        interaction = SimpleNamespace(guild_id=123, guild=None)
+        callback = _find_command(inactivity_group, "policy", "default_set").callback
+
+        await callback(interaction, 30, 30, 1, "OR", 0, 0)
+        assert send_response.await_args.kwargs["kind"] == "error"
+        assert db.config["check_interval_minutes"] == 60
+
+        await callback(interaction, 30, 30, 1, "OR", 0, 1441)
+        assert send_response.await_args.kwargs["kind"] == "error"
+        assert db.config["check_interval_minutes"] == 60
+
+    asyncio.run(_run())
+
+
+def test_inactivity_policy_default_set_persists_custom_interval_without_forcing_when_absent(inattivi_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _run() -> None:
+        db = _FakeDatabase()
+        send_response = AsyncMock()
+        monkeypatch.setattr(inattivi_module, "check_permission", AsyncMock(return_value=True))
+        monkeypatch.setattr(inattivi_module, "send_standard_response", send_response)
+
+        ctx = SimpleNamespace(database=db, footer=None, author=None)
+        inactivity_group = discord.app_commands.Group(name="inactivity", description="inactivity")
+        inattivi_module.register_inattivi(inactivity_group, ctx)
+        interaction = SimpleNamespace(guild_id=123, guild=None)
+        callback = _find_command(inactivity_group, "policy", "default_set").callback
+
+        await callback(interaction, 30, 30, 1, "OR", 0, 5)
+        assert db.config["check_interval_minutes"] == 5
+
+        await callback(interaction, 40, 20, 2, "AND", 10)
+        assert db.config["check_interval_minutes"] == 5
 
     asyncio.run(_run())
 

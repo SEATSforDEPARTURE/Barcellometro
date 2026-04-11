@@ -605,13 +605,14 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         await ctx.database.upsert_inactivity_config(str(interaction.guild_id), invite_url=None)
         await _send(interaction, subcommand_path="inactivity dms invite_reset", lines=[("result", "reset")], kind="success")
 
-    @policy_group.command(name="default_set", description="Set the default inactivity policy.")
+    @policy_group.command(name="default_set", description="Set the default inactivity policy and optional automatic check interval.")
     @app_commands.describe(
         inactive_days="Days without activity before a member is considered inactive.",
         window_days="Message analysis window in days.",
         min_messages="Minimum messages required in the window.",
         mode="Policy mode: OR or AND.",
         min_account_age_days="Minimum account age in days.",
+        check_interval_minutes="Automatic inactive-members check interval in minutes (1-1440).",
     )
     async def inactivity_policy_default_set(
         interaction: discord.Interaction,
@@ -620,6 +621,7 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         min_messages: app_commands.Range[int, 0, 100000],
         mode: str,
         min_account_age_days: app_commands.Range[int, 0, 3650] = 0,
+        check_interval_minutes: int | None = None,
     ) -> None:
         if not await _ensure(interaction) or interaction.guild_id is None:
             return
@@ -628,7 +630,18 @@ def register_inattivi(inactivity_group: app_commands.Group, ctx: CommandContext,
         except ValueError as exc:
             await _send(interaction, subcommand_path="inactivity policy default_set", lines=[("error", str(exc))], kind="error")
             return
-        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), default_policy_json=payload)
+        if check_interval_minutes is not None and not (1 <= int(check_interval_minutes) <= 1440):
+            await _send(
+                interaction,
+                subcommand_path="inactivity policy default_set",
+                lines=[("error", "check_interval_minutes must be between 1 and 1440.")],
+                kind="error",
+            )
+            return
+        fields: dict[str, object] = {"default_policy_json": payload}
+        if check_interval_minutes is not None:
+            fields["check_interval_minutes"] = int(check_interval_minutes)
+        await ctx.database.upsert_inactivity_config(str(interaction.guild_id), **fields)
         await _send(interaction, subcommand_path="inactivity policy default_set", lines=[("policy", _policy_summary(_policy_dict(payload))), ("result", "updated")], kind="success")
 
     @policy_group.command(name="default_show", description="Show the default inactivity policy.")
