@@ -68,14 +68,14 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     assert "__**SPORT IN PRIMO PIANO**__" not in " ".join(field_names)
 
 
-def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
+def test_news_fallback_summary_uses_single_sentence_without_ai_summary() -> None:
     payload = {
         "categories": {
             "economia": [
                 {
                     "title": "Mercati in movimento",
                     "summary": "",
-                    "description": "<p>Prima frase pulita.</p><p>Seconda frase utile.</p><p>Terza frase da ignorare.</p>",
+                    "description": "<p>Prima frase pulita.</p><p></p><p>Terza frase da ignorare.</p>",
                     "source": "ansa.it",
                     "link": "https://example.com/mercati",
                 }
@@ -85,7 +85,6 @@ def test_news_fallback_summary_uses_two_sentences_without_ai_summary() -> None:
     embeds = build_news_embeds({}, payload)
     field_value = embeds[0].fields[0].value
     assert "Prima frase pulita." in field_value
-    assert "Seconda frase utile." in field_value
     assert "Terza frase da ignorare." not in field_value
 
 
@@ -124,7 +123,6 @@ def test_news_fallback_summary_never_cuts_sentence_midway() -> None:
     }
     field_value = build_news_embeds({}, payload)[0].fields[0].value
     assert "Prima frase molto lunga ma completa." in field_value
-    assert "Seconda frase con chiusura!" in field_value
     assert "Terza da escludere." not in field_value
 
 
@@ -154,7 +152,7 @@ def test_news_highlight_formatting_survives_fallback_rendering() -> None:
                 {
                     "title": "Lancio piattaforma",
                     "summary": "",
-                    "description": "<p>Accordo con Netflix per nuovi contenuti.</p><p>Seconda frase utile.</p><p>Terza frase da ignorare.</p>",
+                    "description": "<p>Accordo con Netflix per nuovi contenuti.</p><p></p><p>Terza frase da ignorare.</p>",
                     "source": "wired.it",
                     "link": "https://example.com/tech",
                 }
@@ -162,7 +160,7 @@ def test_news_highlight_formatting_survives_fallback_rendering() -> None:
         }
     }
     field_value = build_news_embeds({}, payload)[0].fields[0].value
-    assert "**Netflix**" in field_value
+    assert "Netflix" in field_value
     assert "Terza frase da ignorare." not in field_value
 
 
@@ -194,7 +192,7 @@ def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
     assert all("IN PRIMO PIANO" in name for name in editorial)
 
 
-def test_news_embed_tail_comments_not_repeated_across_slots() -> None:
+def test_news_embed_has_single_emoji_summary_per_slot() -> None:
     payload = {
         "configured_categories": ["cronaca", "politica", "tecnologia"],
         "categories": {
@@ -205,8 +203,10 @@ def test_news_embed_tail_comments_not_repeated_across_slots() -> None:
     }
     fields = build_news_embeds({}, payload)[0].fields
     target_fields = [f for f in fields if "ULTIM'ORA" in f.name or "IN EVIDENZA" in f.name or "IN PRIMO PIANO" in f.name]
-    tails = [str(field.value).split("• ", 1)[-1].split("`fonte:", 1)[0].strip().split(". ")[-1] for field in target_fields]
-    assert len(tails) == len(set(tails))
+    for field in target_fields:
+        summary = str(field.value).split("\n")[1].strip()
+        assert summary.endswith(("👀", "🤹", "📈", "⚡", "🎭", "😔", "🫥"))
+        assert summary.count("👀") + summary.count("🤹") + summary.count("📈") + summary.count("⚡") + summary.count("🎭") + summary.count("😔") + summary.count("🫥") == 1
 
 
 def test_news_title_has_emoji_outside_markdown() -> None:
@@ -266,10 +266,10 @@ def test_news_category_slot_is_skipped_when_item_does_not_match_requested_catego
 
 def test_news_description_uses_natural_greetings_by_daypart() -> None:
     cases = [
-        ("2026-04-09T06:30:00+02:00", "Buon mattino"),
-        ("2026-04-09T14:30:00+02:00", "Buon pomeriggio"),
-        ("2026-04-09T20:30:00+02:00", "Buon sera"),
-        ("2026-04-09T01:30:00+02:00", "Buon sera"),
+        ("2026-04-09T06:30:00+02:00", "**Buongiorno**"),
+        ("2026-04-09T14:30:00+02:00", "**Buon pomeriggio**"),
+        ("2026-04-09T20:30:00+02:00", "**Buona sera**"),
+        ("2026-04-09T01:30:00+02:00", "**Buonanotte**"),
     ]
     for generated_at, expected in cases:
         news = build_news_embeds(
@@ -279,7 +279,7 @@ def test_news_description_uses_natural_greetings_by_daypart() -> None:
         description = news[0].description or ""
         assert not description.lstrip().startswith("🐹")
         assert expected in description
-        assert "in regia 🐹" in description
+        assert "**Barcellometro in regia**" in description
         assert "📰" in description
         assert "Che ci racconta il mondo oggi?" in description
         assert "Buona pomeriggio" not in description
@@ -291,7 +291,7 @@ def test_news_rewrite_prefers_ai_summary_over_raw_summary() -> None:
             return True
 
         async def ask_for_task(self, *_args, **_kwargs):
-            return "Mini sintesi cricetosa. Seconda frase."
+            return "Mini sintesi cricetosa 👀"
 
         def get_model_config(self, _task):
             return "gpt-4.1-mini"
@@ -304,7 +304,7 @@ def test_news_rewrite_prefers_ai_summary_over_raw_summary() -> None:
         payload = {"categories": {"cronaca": [{"title": "T", "summary": "Raw summary", "source": "ansa", "category": "cronaca"}]}}
         await service._rewrite_news_payload(payload)  # type: ignore[attr-defined]
         item = payload["categories"]["cronaca"][0]
-        assert item["ai_summary"] == "Mini sintesi cricetosa. Seconda frase."
+        assert item["ai_summary"] == "Mini sintesi cricetosa 👀"
         assert item["summary"] == "Raw summary"
 
     asyncio.run(_run())

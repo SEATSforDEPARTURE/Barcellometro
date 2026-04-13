@@ -206,11 +206,11 @@ NEWS_EXTRA_CATALOG = {
     "canzone": ["Heroes — David Bowie\nEnergia da prima pagina per la ruota della redazione."],
     "meme": ["Quando dici «chiudo in 5 minuti» e la breaking spunta al minuto 6."],
 }
-NEWS_DAYPART_COPY = {
-    "mattina": "mattino",
-    "pomeriggio": "pomeriggio",
-    "sera": "sera",
-    "notte": "sera",
+NEWS_DAYPART_GREETING = {
+    "mattina": "Buongiorno",
+    "pomeriggio": "Buon pomeriggio",
+    "sera": "Buona sera",
+    "notte": "Buonanotte",
 }
 _IMPORTANT_PLATFORM_TERMS = (
     "Netflix",
@@ -271,25 +271,8 @@ _NEWS_DELICATE_KEYWORDS = (
     "aggressione",
     "violenza",
 )
-_SERIOUS_NEWS_TAIL_COMMENTS = (
-    "Una vicenda che lascia addosso parecchio gelo 🫥",
-    "Qui il quadro è davvero pesante, purtroppo 😔",
-    "Una storia che colpisce duro, senza girarci attorno 🫥",
-    "Il clima resta cupo, e si sente tutto 😔",
-    "Qui c’è poco da alleggerire, purtroppo 🫥",
-    "Notizia durissima da mandare giù 😔",
-    "Una notizia davvero pesante, purtroppo 🫥",
-    "Qui il quadro è doloroso, senza girarci attorno 😔",
-)
-_STANDARD_NEWS_TAIL_COMMENTS = (
-    "Insomma, aria bella tesa 🐹",
-    "Qui la ruota gira veloce 👀",
-    "Tema che farà ancora discutere parecchio 🤹",
-    "La faccenda resta bella calda 👀",
-    "Qui si continua a girare forte sulla ruota 🐹",
-    "Insomma, il brusio non manca di certo 👀",
-    "Tema che farà discutere ancora un bel po’ 🤹",
-)
+_STANDARD_NEWS_FINAL_EMOJIS = ("👀", "🤹", "📈", "⚡", "🎭")
+_SERIOUS_NEWS_FINAL_EMOJIS = ("😔", "🫥")
 _CATEGORY_MATCH_KEYWORDS = {
     "tecnologia": (
         "ai", "intelligenza artificiale", "software", "hardware", "app", "chip", "startup tech",
@@ -330,7 +313,7 @@ def _is_useless_news_text(text: str) -> bool:
     return not normalized or normalized in _NEWS_BAD_FALLBACKS
 
 
-def extract_first_sentences(text: str, max_sentences: int = 2) -> str:
+def extract_first_sentences(text: str, max_sentences: int = 1) -> str:
     """
     Normalize HTML/text and return at most the first N complete sentences.
     Never cut a sentence in the middle.
@@ -358,7 +341,7 @@ def _first_real_news_sentences(item: dict[str, Any]) -> str:
         candidate = sanitize_public_news_text(str(item.get(key) or ""))
         if _is_useless_news_text(candidate):
             continue
-        return extract_first_sentences(candidate, max_sentences=2)
+        return extract_first_sentences(candidate, max_sentences=1)
     return "Dettagli in aggiornamento."
 
 
@@ -380,7 +363,7 @@ def _build_news_item_summary(
     item: dict[str, Any],
     *,
     display: str,
-    used_tail_comments: set[str] | None = None,
+    used_emojis: set[str] | None = None,
     seed_key: str | None = None,
 ) -> str:
     ai_summary = sanitize_public_news_text(str(item.get("ai_summary") or ""))
@@ -389,7 +372,7 @@ def _build_news_item_summary(
             ai_summary,
             item=item,
             display=display,
-            used_tail_comments=used_tail_comments,
+            used_emojis=used_emojis,
             seed_key=seed_key,
         )
     summary = sanitize_public_news_text(str(item.get("summary") or ""))
@@ -399,14 +382,14 @@ def _build_news_item_summary(
             _first_real_news_sentences(item),
             item=item,
             display=display,
-            used_tail_comments=used_tail_comments,
+            used_emojis=used_emojis,
             seed_key=seed_key,
         )
     return _normalize_news_summary_for_embed(
         summary,
         item=item,
         display=display,
-        used_tail_comments=used_tail_comments,
+        used_emojis=used_emojis,
         seed_key=seed_key,
     )
 
@@ -426,15 +409,15 @@ def _classify_news_tone(item: dict[str, Any], *, display: str) -> str:
     return "standard"
 
 
-def _build_news_tail_comment(*, tone: str, item: dict[str, Any]) -> str:
-    palette = _SERIOUS_NEWS_TAIL_COMMENTS if tone == "serious" else _STANDARD_NEWS_TAIL_COMMENTS
+def _build_news_final_emoji(*, tone: str, item: dict[str, Any]) -> str:
+    palette = _SERIOUS_NEWS_FINAL_EMOJIS if tone == "serious" else _STANDARD_NEWS_FINAL_EMOJIS
     key = _news_identity(item) or sanitize_plain_text(str(item.get("title") or "")).lower() or "news"
     idx = abs(hash(key)) % len(palette)
     return palette[idx]
 
 
-def _pick_news_tail_comment(tone: str, used_comments: set[str], seed_key: str | None = None) -> str:
-    palette = _SERIOUS_NEWS_TAIL_COMMENTS if tone == "serious" else _STANDARD_NEWS_TAIL_COMMENTS
+def _pick_news_final_emoji(tone: str, used_comments: set[str], seed_key: str | None = None) -> str:
+    palette = _SERIOUS_NEWS_FINAL_EMOJIS if tone == "serious" else _STANDARD_NEWS_FINAL_EMOJIS
     key = sanitize_plain_text(seed_key or "").lower() or tone
     start_idx = abs(hash(key)) % len(palette)
     for offset in range(len(palette)):
@@ -485,26 +468,25 @@ def _build_news_summary_body(raw_summary: str, *, item: dict[str, Any], display:
     source_hint = sanitize_public_news_text(str(item.get("summary") or ""))
     if source_hint and SequenceMatcher(None, cleaned.lower(), source_hint.lower()).ratio() >= 0.9:
         cleaned = cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned.lower()
-    cleaned = sanitize_public_news_text(cleaned)
+    cleaned = _NEWS_EMOJI_RE.sub("", sanitize_public_news_text(cleaned)).strip()
     if not cleaned:
         cleaned = "Dettagli in aggiornamento."
-    cleaned = cleaned.strip()
+    cleaned = extract_first_sentences(cleaned, max_sentences=1).strip()
     if not re.search(r"[.!?]\s*$", cleaned):
         cleaned = f"{cleaned}."
     return cleaned
 
 
-def _compose_news_embed_summary(body: str, tail_comment: str) -> str:
+def _compose_news_embed_summary(body: str, final_emoji: str) -> str:
     body_clean = sanitize_public_news_text(body)
-    tail = sanitize_public_news_text(tail_comment)
+    tail = sanitize_public_news_text(final_emoji)
     if not body_clean:
         body_clean = "Dettagli in aggiornamento."
     if not tail:
-        tail = _STANDARD_NEWS_TAIL_COMMENTS[0]
+        tail = _STANDARD_NEWS_FINAL_EMOJIS[0]
     if not re.search(r"[.!?]\s*$", body_clean):
         body_clean = f"{body_clean}."
-    if body_clean.endswith(f" {tail}"):
-        return body_clean
+    body_clean = _NEWS_EMOJI_RE.sub("", body_clean).strip()
     return f"{body_clean} {tail}".strip()
 
 
@@ -513,20 +495,20 @@ def _normalize_news_summary_for_embed(
     *,
     item: dict[str, Any],
     display: str,
-    used_tail_comments: set[str] | None = None,
+    used_emojis: set[str] | None = None,
     seed_key: str | None = None,
 ) -> str:
     tone = _classify_news_tone(item, display=display)
     body = _build_news_summary_body(raw_summary, item=item, display=display, tone=tone)
-    if used_tail_comments is None:
-        tail = _build_news_tail_comment(tone=tone, item=item)
+    if used_emojis is None:
+        tail = _build_news_final_emoji(tone=tone, item=item)
     else:
-        tail = _pick_news_tail_comment(
+        tail = _pick_news_final_emoji(
             tone,
-            used_tail_comments,
+            used_emojis,
             seed_key=seed_key or _news_identity(item) or sanitize_plain_text(str(item.get("title") or "")),
         )
-    logger.info("news_summary_tail_applied tone=%s title=%s tail=%s", tone, sanitize_plain_text(str(item.get("title") or ""))[:80], tail[:80])
+    logger.info("news_summary_emoji_applied tone=%s title=%s emoji=%s", tone, sanitize_plain_text(str(item.get("title") or ""))[:80], tail[:80])
     return _compose_news_embed_summary(body, tail)
 
 
@@ -552,7 +534,10 @@ def highlight_key_terms(text: str) -> str:
         for match in re.finditer(rf"\b{re.escape(phrase)}\b", cleaned, flags=re.IGNORECASE):
             _add_span(match.start(), match.end())
 
-    for match in re.finditer(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", cleaned):
+    skip_first_words = {"Il", "Lo", "La", "I", "Gli", "Le", "Un", "Una"}
+    for match in re.finditer(r"\b([A-Z][a-z]+) ([A-Z][a-z]+)\b", cleaned):
+        if match.group(1) in skip_first_words:
+            continue
         _add_span(match.start(), match.end())
 
     highlights = sorted(highlights, key=lambda span: (span[0], -(span[1] - span[0])))[:4]
@@ -574,37 +559,35 @@ def _format_news_item_block(
     display: str,
     numbered: bool,
     index: int,
-    used_tail_comments: set[str] | None = None,
+    used_emojis: set[str] | None = None,
     seed_key: str | None = None,
 ) -> str:
     link = str(item.get("link") or "").strip()
     title_line = sanitize_plain_text(str(item.get("title") or "Titolo non disponibile"))
     linked_title = f"[{title_line}]({link})" if link else title_line
-    summary = highlight_key_terms(
-        _build_news_item_summary(item, display=display, used_tail_comments=used_tail_comments, seed_key=seed_key)
-    )
-    heading = f"{index}. **{linked_title}**" if numbered else f"**{linked_title}**"
+    summary = _build_news_item_summary(item, display=display, used_emojis=used_emojis, seed_key=seed_key)
+    heading = f"• {index}. **{linked_title}**" if numbered else f"• **{linked_title}**"
     source_line = _news_source_line(item, link=link)
     return _fit_news_field_value(heading=heading, summary=summary, source_line=source_line)
 
 
 def _fit_news_field_value(*, heading: str, summary: str, source_line: str) -> str:
-    composed = f"{heading}\n• {summary}\n`fonte: {source_line}`"
+    composed = f"{heading}\n{summary}\n`fonte: {source_line}`"
     if len(composed) <= _NEWS_FIELD_HARD_LIMIT:
         return composed
     sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", summary) if part.strip()]
     while len(sentences) > 1:
         sentences.pop()
         candidate_summary = " ".join(sentences).strip()
-        candidate = f"{heading}\n• {candidate_summary}\n`fonte: {source_line}`"
+        candidate = f"{heading}\n{candidate_summary}\n`fonte: {source_line}`"
         if len(candidate) <= _NEWS_FIELD_HARD_LIMIT:
             return candidate
     one_sentence = sentences[0] if sentences else summary
-    candidate = f"{heading}\n• {one_sentence}\n`fonte: {source_line}`"
+    candidate = f"{heading}\n{one_sentence}\n`fonte: {source_line}`"
     if len(candidate) <= _NEWS_FIELD_HARD_LIMIT:
         return candidate
     # Extreme safeguard: preserve structure without cutting a sentence mid-stream.
-    return f"{heading}\n• Dettagli disponibili al link.\n`fonte: {source_line}`"
+    return f"{heading}\nDettagli disponibili al link. 👀\n`fonte: {source_line}`"
 
 
 def similarity_title(a: str, b: str) -> float:
@@ -709,14 +692,14 @@ def _parse_news_datetime(raw: Any) -> datetime | None:
 
 
 def _build_single_news_field_value(item: dict[str, Any], *, display: str) -> str:
-    return _build_single_news_field_value_with_tail_tracking(item=item, display=display, used_tail_comments=None, seed_key=None)
+    return _build_single_news_field_value_with_emoji_tracking(item=item, display=display, used_emojis=None, seed_key=None)
 
 
-def _build_single_news_field_value_with_tail_tracking(
+def _build_single_news_field_value_with_emoji_tracking(
     item: dict[str, Any],
     *,
     display: str,
-    used_tail_comments: set[str] | None,
+    used_emojis: set[str] | None,
     seed_key: str | None,
 ) -> str:
     return _format_news_item_block(
@@ -724,7 +707,7 @@ def _build_single_news_field_value_with_tail_tracking(
         display=display,
         numbered=False,
         index=0,
-        used_tail_comments=used_tail_comments,
+        used_emojis=used_emojis,
         seed_key=seed_key,
     )
 
@@ -1195,11 +1178,11 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     now_utc = _overview_now(payload)
     edition_label, daypart = news_edition_label_for_datetime(now_utc)
     overview = discord.Embed(title=_format_news_title(f"HAMSTER NEWS • {edition_label}"), color=color)
-    time_of_day = NEWS_DAYPART_COPY.get(daypart, NEWS_DAYPART_COPY["pomeriggio"])
+    greeting = NEWS_DAYPART_GREETING.get(daypart, NEWS_DAYPART_GREETING["pomeriggio"])
     overview.description = format_standard_description(
         (
-            f"Buon {time_of_day}: qui Barcellometro in regia 🐹, con la redazione più rumorosa del quartiere. "
-            "Titoli caldi, pochi giri di parole e dritti al punto. 📰\n"
+            f"**{greeting}**: qui **Barcellometro in regia** 🐹, con la redazione più rumorosa del quartiere. "
+            "**Titoli caldi**, pochi giri di parole e **dritti al punto**. 📰\n"
             "Che ci racconta il mondo oggi?"
         ),
         blank_line_before_fields=True,
@@ -1209,7 +1192,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         selected_slots = select_final_news_slots(payload)
     editorial_categories: list[tuple[str, str, str, dict[str, Any]]] = []
     latest_item: dict[str, Any] | None = None
-    used_tail_comments: set[str] = set()
+    used_emojis: set[str] = set()
     for slot in selected_slots:
         if not isinstance(slot, dict):
             continue
@@ -1223,10 +1206,10 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             latest_item = item
             overview.add_field(
                 name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
-                value=_build_single_news_field_value_with_tail_tracking(
+                value=_build_single_news_field_value_with_emoji_tracking(
                     item,
                     display="ULTIM'ORA",
-                    used_tail_comments=used_tail_comments,
+                    used_emojis=used_emojis,
                     seed_key=f"ultimora:{_news_identity(item)}",
                 ),
                 inline=False,
@@ -1235,10 +1218,10 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         if slot_type == "featured":
             overview.add_field(
                 name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
-                value=_build_single_news_field_value_with_tail_tracking(
+                value=_build_single_news_field_value_with_emoji_tracking(
                     item,
                     display="IN EVIDENZA",
-                    used_tail_comments=used_tail_comments,
+                    used_emojis=used_emojis,
                     seed_key=f"featured:{_news_identity(item)}",
                 ),
                 inline=False,
@@ -1248,10 +1231,10 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         category_key = str(slot.get("category") or "")
         overview.add_field(
             name=format_standard_field_name(f"{display} IN PRIMO PIANO", emoji=emoji),
-            value=_build_single_news_field_value_with_tail_tracking(
+            value=_build_single_news_field_value_with_emoji_tracking(
                 item,
                 display=display,
-                used_tail_comments=used_tail_comments,
+                used_emojis=used_emojis,
                 seed_key=f"{category_key}:{_news_identity(item)}",
             ),
             inline=False,
