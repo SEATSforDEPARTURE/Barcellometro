@@ -19,6 +19,7 @@ from app.services.campaign_content_fetchers import (
     NEWS_SOURCE_ALIASES,
     NEWS_SOURCE_CATALOG,
 )
+from app.services.campaign_content_formatter import SIGN_ORDER, WEATHER_AREAS
 from app.services.scheduler_utils import calculate_initial_next_run
 from app.shared.discord.command_embeds import CommandEmbedSection, CommandKind, send_standard_response
 
@@ -48,6 +49,14 @@ NEWS_EXTRA_LABELS = {
     "canzone": "canzone",
     "meme": "meme",
 }
+WEATHER_AREA_CHOICES = [str(area).strip().lower() for area in WEATHER_AREAS]
+WEATHER_AREA_LABELS = {
+    "nord": "Nord",
+    "centro": "Centro",
+    "sud_e_isole": "Sud e Isole",
+}
+HOROSCOPE_SIGN_CHOICES = [str(sign).strip().lower() for sign in SIGN_ORDER]
+HOROSCOPE_SIGN_LABELS = {str(sign).strip().lower(): str(sign).strip() for sign in SIGN_ORDER}
 
 
 def _fold_token(value: str) -> str:
@@ -382,6 +391,21 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             current,
             allowed_values=NEWS_EXTRA_CHOICES,
             preferred_labels=NEWS_EXTRA_LABELS,
+        )
+
+    async def _weather_areas_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=WEATHER_AREA_CHOICES,
+            preferred_labels=WEATHER_AREA_LABELS,
+        )
+
+    async def _horoscope_signs_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=HOROSCOPE_SIGN_CHOICES,
+            preferred_labels=HOROSCOPE_SIGN_LABELS,
+            normalizer=_fold_token,
         )
 
     async def _get_service_schedule(guild_id: str, service_type: str, schedule_id: int) -> dict[str, object] | None:
@@ -1282,7 +1306,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title="Optional embed title",
         embed_color="Optional embed color",
         sources="Comma-separated provider list",
+        categories="Guided multi-value areas (comma-separated)",
     )
+    @app_commands.autocomplete(categories=_weather_areas_autocomplete)
     async def weather_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
@@ -1290,7 +1316,17 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title: str | None = None,
         embed_color: str | None = None,
         sources: str | None = None,
+        categories: str | None = None,
     ) -> None:
+        normalized_categories, invalid_categories = _parse_guided_csv_values(categories, allowed=WEATHER_AREA_CHOICES)
+        if invalid_categories:
+            await _send(
+                interaction,
+                subcommand_path="campaigns weather schedule_add",
+                lines=[("error", f"Unsupported areas: {', '.join(invalid_categories)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_add(
             interaction,
             service_type="WEATHER",
@@ -1299,7 +1335,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_title=embed_title,
             embed_color=embed_color,
             sources=sources,
-            categories=None,
+            categories=",".join(normalized_categories) if categories is not None else None,
         )
 
     @weather_group.command(name="schedule_edit", description="Edit a weather campaign schedule")
@@ -1311,7 +1347,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_color="Optional embed color",
         sources="Comma-separated provider list",
         enabled="Enable or disable this schedule",
+        categories="Guided multi-value areas (comma-separated)",
     )
+    @app_commands.autocomplete(categories=_weather_areas_autocomplete)
     async def weather_schedule_edit(
         interaction: discord.Interaction,
         id: int,
@@ -1320,8 +1358,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title: str | None = None,
         embed_color: str | None = None,
         sources: str | None = None,
+        categories: str | None = None,
         enabled: bool | None = None,
     ) -> None:
+        normalized_categories, invalid_categories = _parse_guided_csv_values(categories, allowed=WEATHER_AREA_CHOICES)
+        if invalid_categories:
+            await _send(
+                interaction,
+                subcommand_path="campaigns weather schedule_edit",
+                lines=[("error", f"Unsupported areas: {', '.join(invalid_categories)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_edit(
             interaction,
             service_type="WEATHER",
@@ -1331,6 +1379,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_title=embed_title,
             embed_color=embed_color,
             sources=sources,
+            categories=",".join(normalized_categories) if categories is not None else None,
             enabled=enabled,
         )
 
@@ -1372,7 +1421,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title="Optional embed title",
         embed_color="Optional embed color",
         sources="Comma-separated provider list",
+        categories="Guided multi-value signs (comma-separated)",
     )
+    @app_commands.autocomplete(categories=_horoscope_signs_autocomplete)
     async def horoscope_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
@@ -1380,7 +1431,21 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title: str | None = None,
         embed_color: str | None = None,
         sources: str | None = None,
+        categories: str | None = None,
     ) -> None:
+        normalized_categories, invalid_categories = _parse_guided_csv_values(
+            categories,
+            allowed=HOROSCOPE_SIGN_CHOICES,
+            normalizer=_fold_token,
+        )
+        if invalid_categories:
+            await _send(
+                interaction,
+                subcommand_path="campaigns horoscope schedule_add",
+                lines=[("error", f"Unsupported signs: {', '.join(invalid_categories)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_add(
             interaction,
             service_type="HOROSCOPE",
@@ -1389,7 +1454,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_title=embed_title,
             embed_color=embed_color,
             sources=sources,
-            categories=None,
+            categories=",".join(normalized_categories) if categories is not None else None,
         )
 
     @horoscope_group.command(name="schedule_edit", description="Edit a horoscope campaign schedule")
@@ -1401,7 +1466,9 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_color="Optional embed color",
         sources="Comma-separated provider list",
         enabled="Enable or disable this schedule",
+        categories="Guided multi-value signs (comma-separated)",
     )
+    @app_commands.autocomplete(categories=_horoscope_signs_autocomplete)
     async def horoscope_schedule_edit(
         interaction: discord.Interaction,
         id: int,
@@ -1410,8 +1477,22 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         embed_title: str | None = None,
         embed_color: str | None = None,
         sources: str | None = None,
+        categories: str | None = None,
         enabled: bool | None = None,
     ) -> None:
+        normalized_categories, invalid_categories = _parse_guided_csv_values(
+            categories,
+            allowed=HOROSCOPE_SIGN_CHOICES,
+            normalizer=_fold_token,
+        )
+        if invalid_categories:
+            await _send(
+                interaction,
+                subcommand_path="campaigns horoscope schedule_edit",
+                lines=[("error", f"Unsupported signs: {', '.join(invalid_categories)}.")],
+                kind="error",
+            )
+            return
         await _service_schedule_edit(
             interaction,
             service_type="HOROSCOPE",
@@ -1421,6 +1502,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             embed_title=embed_title,
             embed_color=embed_color,
             sources=sources,
+            categories=",".join(normalized_categories) if categories is not None else None,
             enabled=enabled,
         )
 
