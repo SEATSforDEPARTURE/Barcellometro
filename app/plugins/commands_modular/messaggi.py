@@ -14,10 +14,12 @@ from app.plugins.commands_modular.ctx import CommandContext
 from app.plugins.commands_modular.permissions import check_permission
 from app.plugins.commands_modular.time_windows import parse_italian_datetime
 from app.services.campaign_content_fetchers import (
+    HOROSCOPE_SOURCE_MAP,
     NEWS_CATEGORY_ALIASES,
     NEWS_CATEGORY_CATALOG,
     NEWS_SOURCE_ALIASES,
     NEWS_SOURCE_CATALOG,
+    WEATHER_SOURCE_MAP,
 )
 from app.services.campaign_content_formatter import SIGN_ORDER, WEATHER_AREAS
 from app.services.scheduler_utils import calculate_initial_next_run
@@ -57,6 +59,10 @@ WEATHER_AREA_LABELS = {
 }
 HOROSCOPE_SIGN_CHOICES = [str(sign).strip().lower() for sign in SIGN_ORDER]
 HOROSCOPE_SIGN_LABELS = {str(sign).strip().lower(): str(sign).strip() for sign in SIGN_ORDER}
+WEATHER_SOURCE_CHOICES = [str(source).strip().lower() for source in WEATHER_SOURCE_MAP]
+WEATHER_SOURCE_LABELS = {str(source).strip().lower(): str(source).strip() for source in WEATHER_SOURCE_MAP}
+HOROSCOPE_SOURCE_CHOICES = [str(source).strip().lower() for source in HOROSCOPE_SOURCE_MAP]
+HOROSCOPE_SOURCE_LABELS = {str(source).strip().lower(): str(source).strip() for source in HOROSCOPE_SOURCE_MAP}
 
 
 def _fold_token(value: str) -> str:
@@ -400,12 +406,26 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             preferred_labels=WEATHER_AREA_LABELS,
         )
 
+    async def _weather_sources_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=WEATHER_SOURCE_CHOICES,
+            preferred_labels=WEATHER_SOURCE_LABELS,
+        )
+
     async def _horoscope_signs_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         return _compose_guided_csv_suggestions(
             current,
             allowed_values=HOROSCOPE_SIGN_CHOICES,
             preferred_labels=HOROSCOPE_SIGN_LABELS,
             normalizer=_fold_token,
+        )
+
+    async def _horoscope_sources_autocomplete(_: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        return _compose_guided_csv_suggestions(
+            current,
+            allowed_values=HOROSCOPE_SOURCE_CHOICES,
+            preferred_labels=HOROSCOPE_SOURCE_LABELS,
         )
 
     async def _get_service_schedule(guild_id: str, service_type: str, schedule_id: int) -> dict[str, object] | None:
@@ -1305,10 +1325,10 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        sources="Comma-separated provider list",
+        sources="Guided multi-value providers (comma-separated)",
         categories="Guided multi-value areas (comma-separated)",
     )
-    @app_commands.autocomplete(categories=_weather_areas_autocomplete)
+    @app_commands.autocomplete(sources=_weather_sources_autocomplete, categories=_weather_areas_autocomplete)
     async def weather_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
@@ -1318,6 +1338,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         sources: str | None = None,
         categories: str | None = None,
     ) -> None:
+        normalized_sources, invalid_sources = _parse_guided_csv_values(
+            sources,
+            allowed=WEATHER_SOURCE_CHOICES,
+        )
+        if invalid_sources:
+            await _send(
+                interaction,
+                subcommand_path="campaigns weather schedule_add",
+                lines=[("error", f"Unsupported sources: {', '.join(invalid_sources)}.")],
+                kind="error",
+            )
+            return
         normalized_categories, invalid_categories = _parse_guided_csv_values(categories, allowed=WEATHER_AREA_CHOICES)
         if invalid_categories:
             await _send(
@@ -1334,7 +1366,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             every=every,
             embed_title=embed_title,
             embed_color=embed_color,
-            sources=sources,
+            sources=",".join(normalized_sources) if sources is not None else None,
             categories=",".join(normalized_categories) if categories is not None else None,
         )
 
@@ -1345,11 +1377,11 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        sources="Comma-separated provider list",
+        sources="Guided multi-value providers (comma-separated)",
         enabled="Enable or disable this schedule",
         categories="Guided multi-value areas (comma-separated)",
     )
-    @app_commands.autocomplete(categories=_weather_areas_autocomplete)
+    @app_commands.autocomplete(sources=_weather_sources_autocomplete, categories=_weather_areas_autocomplete)
     async def weather_schedule_edit(
         interaction: discord.Interaction,
         id: int,
@@ -1361,6 +1393,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         categories: str | None = None,
         enabled: bool | None = None,
     ) -> None:
+        normalized_sources, invalid_sources = _parse_guided_csv_values(
+            sources,
+            allowed=WEATHER_SOURCE_CHOICES,
+        )
+        if invalid_sources:
+            await _send(
+                interaction,
+                subcommand_path="campaigns weather schedule_edit",
+                lines=[("error", f"Unsupported sources: {', '.join(invalid_sources)}.")],
+                kind="error",
+            )
+            return
         normalized_categories, invalid_categories = _parse_guided_csv_values(categories, allowed=WEATHER_AREA_CHOICES)
         if invalid_categories:
             await _send(
@@ -1378,7 +1422,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             every=every,
             embed_title=embed_title,
             embed_color=embed_color,
-            sources=sources,
+            sources=",".join(normalized_sources) if sources is not None else None,
             categories=",".join(normalized_categories) if categories is not None else None,
             enabled=enabled,
         )
@@ -1420,10 +1464,10 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        sources="Comma-separated provider list",
+        sources="Guided multi-value providers (comma-separated)",
         categories="Guided multi-value signs (comma-separated)",
     )
-    @app_commands.autocomplete(categories=_horoscope_signs_autocomplete)
+    @app_commands.autocomplete(sources=_horoscope_sources_autocomplete, categories=_horoscope_signs_autocomplete)
     async def horoscope_schedule_add(
         interaction: discord.Interaction,
         publish_at: str | None = None,
@@ -1433,6 +1477,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         sources: str | None = None,
         categories: str | None = None,
     ) -> None:
+        normalized_sources, invalid_sources = _parse_guided_csv_values(
+            sources,
+            allowed=HOROSCOPE_SOURCE_CHOICES,
+        )
+        if invalid_sources:
+            await _send(
+                interaction,
+                subcommand_path="campaigns horoscope schedule_add",
+                lines=[("error", f"Unsupported sources: {', '.join(invalid_sources)}.")],
+                kind="error",
+            )
+            return
         normalized_categories, invalid_categories = _parse_guided_csv_values(
             categories,
             allowed=HOROSCOPE_SIGN_CHOICES,
@@ -1453,7 +1509,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             every=every,
             embed_title=embed_title,
             embed_color=embed_color,
-            sources=sources,
+            sources=",".join(normalized_sources) if sources is not None else None,
             categories=",".join(normalized_categories) if categories is not None else None,
         )
 
@@ -1464,11 +1520,11 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         every="Repeat interval in minutes",
         embed_title="Optional embed title",
         embed_color="Optional embed color",
-        sources="Comma-separated provider list",
+        sources="Guided multi-value providers (comma-separated)",
         enabled="Enable or disable this schedule",
         categories="Guided multi-value signs (comma-separated)",
     )
-    @app_commands.autocomplete(categories=_horoscope_signs_autocomplete)
+    @app_commands.autocomplete(sources=_horoscope_sources_autocomplete, categories=_horoscope_signs_autocomplete)
     async def horoscope_schedule_edit(
         interaction: discord.Interaction,
         id: int,
@@ -1480,6 +1536,18 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
         categories: str | None = None,
         enabled: bool | None = None,
     ) -> None:
+        normalized_sources, invalid_sources = _parse_guided_csv_values(
+            sources,
+            allowed=HOROSCOPE_SOURCE_CHOICES,
+        )
+        if invalid_sources:
+            await _send(
+                interaction,
+                subcommand_path="campaigns horoscope schedule_edit",
+                lines=[("error", f"Unsupported sources: {', '.join(invalid_sources)}.")],
+                kind="error",
+            )
+            return
         normalized_categories, invalid_categories = _parse_guided_csv_values(
             categories,
             allowed=HOROSCOPE_SIGN_CHOICES,
@@ -1501,7 +1569,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             every=every,
             embed_title=embed_title,
             embed_color=embed_color,
-            sources=sources,
+            sources=",".join(normalized_sources) if sources is not None else None,
             categories=",".join(normalized_categories) if categories is not None else None,
             enabled=enabled,
         )
