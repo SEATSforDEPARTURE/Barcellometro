@@ -1157,6 +1157,23 @@ def _next_news_run_field(config: dict[str, Any], *, generated_at: datetime) -> s
     )
 
 
+def _next_weather_run_field(config: dict[str, Any], *, generated_at: datetime) -> str | None:
+    _ = generated_at
+    next_run_raw = str(config.get("next_scheduled_run_at") or "").strip()
+    if not next_run_raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(next_run_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    next_run = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    next_run = next_run.astimezone(_ITALY_TZ)
+    return (
+        "• Il criceto chiude il taccuino meteo per ora.\n"
+        f"• Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
+    )
+
+
 def _format_news_title(text: str) -> str:
     return f"📰 {format_standard_title(text)}"
 
@@ -1268,7 +1285,6 @@ def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
-    title = config.get("embed_title") or "🌦️ Meteo Italia"
     regions = payload.get("regions", {})
 
     all_temps: list[float] = []
@@ -1286,23 +1302,37 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
 
     most_unstable = max(area_scores.items(), key=lambda x: x[1])[0] if area_scores else "n/d"
     most_calm = min(area_scores.items(), key=lambda x: x[1])[0] if area_scores else "n/d"
-    thermal_range = f"{round(min(all_temps), 1)}°C - {round(max(all_temps), 1)}°C" if all_temps else "n/d"
-    tone = _time_of_day_label(_overview_now(payload))
+    thermal_range = f"{round(min(all_temps), 1)}°C – {round(max(all_temps), 1)}°C" if all_temps else "n/d"
+    now_utc = _overview_now(payload)
+    edition_label, daypart = news_edition_label_for_datetime(now_utc)
+    greeting = NEWS_DAYPART_GREETING.get(daypart, NEWS_DAYPART_GREETING["pomeriggio"])
 
     selected_areas = {slugify_label(item) for item in str(config.get("categories_json") or "").split(",") if str(item).strip()}
     if not selected_areas:
         selected_areas = set(WEATHER_AREAS)
 
-    overview = discord.Embed(title=format_standard_title(f"{title} • Overview Italia"), color=color)
+    overview = discord.Embed(title=f"🌦️ {format_standard_title(f'METEO ITALIA • {edition_label}')}", color=color)
     overview.description = format_standard_description(
         (
-            "🇮🇹 Situazione generale aggregata dalle aree monitorate.\n"
-            f"🐹 Buona {tone}: il Barcellometro ha preso il microfono del meteo nazionale.\n"
-            f"⚡ Area più instabile: **{most_unstable}**\n"
-            f"🌤️ Area più serena: **{most_calm}**\n"
-            f"🌡️ Range termico nazionale: **{thermal_range}**"
+            f"**{greeting}** 🐹: qui **Barcellometro in regia**, con il quadro del meteo nazionale. "
+            "**Pochi giri di parole**, **zone più mosse** e **temperature sotto controllo**."
         ),
         blank_line_before_fields=True,
+    )
+    overview.add_field(
+        name=format_standard_field_name("AREA PIÙ INSTABILE", emoji="🌩️"),
+        value=f"• **{most_unstable}**",
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("AREA PIÙ SERENA", emoji="🌤️"),
+        value=f"• **{most_calm}**",
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("RANGE TERMICO", emoji="🌡️"),
+        value=f"• **{thermal_range}**",
+        inline=False,
     )
 
     for region in ["Nord", "Centro", "Sud", "Isole"]:
@@ -1311,16 +1341,38 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         area_payload = regions.get(region, {})
         area_payload = area_payload if isinstance(area_payload, dict) else {"sampled_cities": area_payload}
         entries = area_payload.get("sampled_cities", [])
-        row = [f"🧾 {area_notes.get(region, region)}"]
+        region_key = slugify_label(region)
+        short_openers = {
+            "nord": "Settimana movimentata e cielo ancora capriccioso sul Nord. 👀",
+            "centro": "Giornata un po' ballerina al Centro, con ombrelli ancora protagonisti. 🌧️",
+            "sud": "Al Sud prevale un cielo più tranquillo, con qualche nuvola di passaggio. 🙂",
+            "isole": "Sulle Isole il quadro è più aperto, tra pause serene e qualche incertezza. 🌤️",
+        }
+        row = [f"• {short_openers.get(region_key, area_notes.get(region, region))}"]
         for entry in entries[:4]:
+            city = entry.get("city", "Città")
+            temperature = entry.get("temperature", "n/d")
+            windspeed = entry.get("windspeed", "n/d")
+            condition = entry.get("condition", "condizioni variabili")
             row.append(
-                f"**{entry.get('city', 'Città')}** · {entry.get('temperature', 'n/d')}°C · vento {entry.get('windspeed', 'n/d')} km/h · {entry.get('condition', 'condizioni variabili')}"
+                f"• **{city}** · **{temperature}°C** · vento **{windspeed} km/h** · {condition}"
             )
-        value = "\n".join(row) or "Dati non disponibili"
-        focus = f"🐹 Focus area: {area_payload.get('precipitation_summary', 'situazione in aggiornamento')} · {area_payload.get('wind_summary', 'vento in osservazione')}"
+        if len(entries) == 0:
+            row.append("• Dati città in aggiornamento.")
+        precipitation_summary = area_payload.get("precipitation_summary", "situazione in aggiornamento")
+        wind_summary = area_payload.get("wind_summary", "vento in osservazione")
+        focus = f"• **Focus area:** {precipitation_summary} · {wind_summary}"
+        value = "\n".join(row)
         overview.add_field(
             name=format_standard_field_name(region.upper(), emoji="📍"),
             value=f"{value[:780]}\n{focus[:220]}",
+            inline=False,
+        )
+    next_run_field = _next_weather_run_field(config, generated_at=now_utc)
+    if next_run_field:
+        overview.add_field(
+            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
+            value=next_run_field,
             inline=False,
         )
     return _apply_campaign_footer([overview], service_name="campagne_meteo")

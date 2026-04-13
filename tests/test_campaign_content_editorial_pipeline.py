@@ -43,9 +43,12 @@ def test_build_weather_embeds_page_order() -> None:
         {"regions": {"Nord": {"sampled_cities": []}, "Centro": {"sampled_cities": []}, "Sud": {"sampled_cities": []}, "Isole": {"sampled_cities": []}}},
     )
     titles = [_normalize_standardized_title(e.title) for e in embeds]
-    assert "OVERVIEW ITALIA" in titles[0]
+    assert "METEO ITALIA • EDIZIONE" in titles[0]
     assert len(embeds) == 1
     names = [field.name for field in embeds[0].fields]
+    assert "🌩️ __**AREA PIÙ INSTABILE**__" in names
+    assert "🌤️ __**AREA PIÙ SERENA**__" in names
+    assert "🌡️ __**RANGE TERMICO**__" in names
     assert any("NORD" in name for name in names)
     assert any("CENTRO" in name for name in names)
     assert any("SUD" in name for name in names)
@@ -67,6 +70,11 @@ def test_weather_embed_renders_sud_and_isole_as_distinct_fields_when_both_select
     assert any("SUD" in name for name in names)
     assert any("ISOLE" in name for name in names)
     assert all("SUD E ISOLE" not in name for name in names)
+    field_map = {field.name: field.value or "" for field in embeds[0].fields}
+    assert field_map["📍 __**SUD**__"].splitlines()[0].startswith("• ")
+    assert not field_map["📍 __**SUD**__"].splitlines()[0].startswith("• 🐹")
+    assert "• **Napoli** · **27°C** · vento **8 km/h** · sereno" in field_map["📍 __**SUD**__"]
+    assert "• **Focus area:**" in field_map["📍 __**SUD**__"]
 
 
 def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
@@ -772,5 +780,20 @@ def test_weather_and_news_publish_succeed_when_rewrite_text_ai_fails() -> None:
                 {"guild_id": "1", "channel_id": "2", "id": 10, "interval_minutes": 60, "sources_json": "[]", "categories_json": "[]"}
             )
         assert db.upsert_campaign_content_message.await_count == 2
+
+    asyncio.run(_run())
+
+
+def test_weather_service_resolves_next_recurring_run_and_passes_it_to_embed_builder() -> None:
+    async def _run() -> None:
+        class _Db:
+            async def list_campaign_content_recurring_schedule_runs(self, **_kwargs):
+                return [{"next_effective_run_at": "2026-04-09T19:00:00+00:00"}]
+
+        service = CampaignContentService(database=_Db(), bot=object(), ai_service=None)  # type: ignore[arg-type]
+        config = {"guild_id": "1", "channel_id": "2", "service_type": "WEATHER"}
+        next_run = await service._resolve_next_scheduled_run(config, service_type="WEATHER")  # type: ignore[attr-defined]
+        assert next_run is not None
+        assert next_run.isoformat() == "2026-04-09T19:00:00+00:00"
 
     asyncio.run(_run())
