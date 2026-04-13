@@ -85,11 +85,12 @@ CATEGORY_EMOJIS = {
 WEATHER_AREA_LABELS = {
     "nord": "🧊 NORD",
     "centro": "🏛️ CENTRO",
-    "sud e isole": "🌋 SUD E ISOLE",
+    "sud": "🌋 SUD",
+    "isole": "🏝️ ISOLE",
 }
 
 HOROSCOPE_SECTIONS = ["love", "work", "money", "energy", "friction", "advice"]
-WEATHER_AREAS = ["nord", "centro", "sud_e_isole"]
+WEATHER_AREAS = ["nord", "centro", "sud", "isole"]
 
 
 def resolve_color(color_raw: str | None) -> int:
@@ -1304,7 +1305,7 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         blank_line_before_fields=True,
     )
 
-    for region in ["Nord", "Centro", "Sud e Isole"]:
+    for region in ["Nord", "Centro", "Sud", "Isole"]:
         if slugify_label(region) not in selected_areas:
             continue
         area_payload = regions.get(region, {})

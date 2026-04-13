@@ -541,6 +541,10 @@ def test_weather_schedule_add_normalizes_selected_areas(messaggi_module) -> None
     asyncio.run(_run())
 
 
+def test_weather_supported_areas_are_exact_and_separate(messaggi_module) -> None:
+    assert messaggi_module.WEATHER_AREA_CHOICES == ["nord", "centro", "sud", "isole"]
+
+
 def test_weather_schedule_add_normalizes_sources_and_persists_backend_format(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
@@ -570,6 +574,43 @@ def test_weather_schedule_add_rejects_unsupported_sources(messaggi_module) -> No
         await callback(_FakeInteraction(), sources="unsupported-provider")
         assert db.created_service_payload is None
         assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
+def test_weather_schedule_add_accepts_sud_and_isole_as_two_distinct_values(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "schedule_add")
+        await callback(_FakeInteraction(), categories="sud,isole")
+        assert db.created_service_payload["categories_json"] == "sud,isole"
+
+    asyncio.run(_run())
+
+
+def test_weather_schedule_add_rejects_natural_conjunction_and_suggests_csv(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.send_standard_response.reset_mock()
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "schedule_add")
+        await callback(_FakeInteraction(), categories="sud e isole")
+
+        assert db.created_service_payload is None
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+        error_line = messaggi_module.send_standard_response.await_args.kwargs["lines"][0][1]
+        assert "Use separate values like: sud,isole" in error_line
 
     asyncio.run(_run())
 

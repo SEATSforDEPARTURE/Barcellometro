@@ -900,7 +900,8 @@ def fetch_weather_content(sources: list[str]) -> dict[str, Any]:
     regions = {
         "Nord": [(45.4642, 9.19, "Milano"), (45.0703, 7.6869, "Torino"), (44.4056, 8.9463, "Genova")],
         "Centro": [(41.9028, 12.4964, "Roma"), (43.7696, 11.2558, "Firenze"), (43.1107, 12.3908, "Perugia")],
-        "Sud e Isole": [(40.8518, 14.2681, "Napoli"), (38.1157, 13.3615, "Palermo"), (39.2238, 9.1217, "Cagliari")],
+        "Sud": [(40.8518, 14.2681, "Napoli"), (41.1171, 16.8719, "Bari"), (38.1112, 15.6472, "Reggio Calabria")],
+        "Isole": [(38.1157, 13.3615, "Palermo"), (39.2238, 9.1217, "Cagliari"), (37.5079, 15.083, "Catania")],
     }
 
     weathercode_map = {
