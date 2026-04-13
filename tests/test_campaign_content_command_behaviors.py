@@ -497,6 +497,45 @@ def test_news_schedule_add_command_exposes_autocomplete() -> None:
     assert "@app_commands.autocomplete(sources=_news_sources_autocomplete, categories=_news_categories_autocomplete, extras=_news_extras_autocomplete)" in source
 
 
+def test_weather_and_horoscope_schedule_commands_expose_guided_autocomplete() -> None:
+    source = Path("app/plugins/commands_modular/messaggi.py").read_text(encoding="utf-8")
+    assert "@app_commands.autocomplete(categories=_weather_areas_autocomplete)" in source
+    assert "@app_commands.autocomplete(categories=_horoscope_signs_autocomplete)" in source
+
+
+def test_weather_schedule_add_normalizes_selected_areas(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "schedule_add")
+        await callback(_FakeInteraction(), categories="Nord, centro, Nord")
+        assert db.created_service_payload["categories_json"] == "nord,centro"
+
+    asyncio.run(_run())
+
+
+def test_horoscope_schedule_add_rejects_unsupported_signs(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        horoscope_group = _get_subgroup(group, "horoscope")
+        callback = _get_command_callback(horoscope_group, "schedule_add")
+        await callback(_FakeInteraction(), categories="Ariete, SegnoInventato")
+        assert db.created_service_payload is None
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
 def test_custom_run_keeps_existing_behavior_for_message_campaign(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()

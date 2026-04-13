@@ -36,12 +36,10 @@ from app.services.campaign_content_formatter import (
     sanitize_public_news_text,
     sanitize_horoscope_text,
 )
-from app.services.campaign_content_views import BaseCampaignNavigatorView, PersistentCampaignLauncherView
 from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
-from app.shared.discord.component_notices import send_standard_component_notice
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
@@ -230,15 +228,7 @@ class CampaignContentService:
         if not isinstance(channel, discord.abc.Messageable):
             return
         page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=payload)
-        view: discord.ui.View | None = None
-        if service_type in {"WEATHER", "HOROSCOPE"}:
-            view = PersistentCampaignLauncherView(
-                self,
-                service_type=service_type,
-                total_pages=len(embeds),
-                page_map=page_map,
-            )
-        message = await channel.send(embed=embeds[0], view=view)
+        message = await channel.send(embed=embeds[0])
         metadata = {
             "footer_text": footer_text,
             "configured_sources": configured_sources,
@@ -783,70 +773,6 @@ class CampaignContentService:
             "metadata": metadata,
             "current_index": current_index,
         }
-
-    async def open_personal_navigator(self, interaction: discord.Interaction, *, target_index: int, service_type: str) -> bool:
-        if str(service_type or "").upper() == "NEWS":
-            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
-            return False
-        message = interaction.message
-        if message is None:
-            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
-            return False
-        record = await self.load_message_record(str(message.id))
-        if record is None:
-            await send_standard_component_notice(interaction, area="campaign navigation", message="Navigazione non disponibile.", kind="warning")
-            return False
-
-        embeds = record.get("embeds", [])
-        if not isinstance(embeds, list) or not embeds:
-            await send_standard_component_notice(interaction, area="campaign navigation", message="Pagina non disponibile.", kind="warning")
-            return False
-
-        metadata = record.get("metadata", {})
-        page_map = metadata.get("page_map") if isinstance(metadata, dict) else None
-        if not isinstance(page_map, list):
-            page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=None)
-
-        index = max(0, min(target_index, len(embeds) - 1))
-        view = BaseCampaignNavigatorView(
-            self,
-            embeds=embeds,
-            page_map=page_map,
-            service_type=service_type,
-            metadata=metadata if isinstance(metadata, dict) else None,
-            current_index=index,
-            timeout=600,
-        )
-        embed = await self._hydrate_stored_campaign_embed(
-            service_type=service_type,
-            embed_payload=embeds[index],
-            metadata=metadata if isinstance(metadata, dict) else None,
-        )
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        return True
-
-    async def edit_public_message(self, interaction: discord.Interaction, *, target_index: int) -> bool:
-        message = interaction.message
-        if message is None:
-            return False
-        record = await self.load_message_record(str(message.id))
-        if record is None:
-            return False
-        embeds = record.get("embeds", [])
-        if not embeds:
-            return False
-        index = max(0, min(target_index, len(embeds) - 1))
-        metadata = record.get("metadata", {})
-        page_map = metadata.get("page_map") if isinstance(metadata, dict) else []
-        resolved_service_type = str(record.get("service_type") or "WEATHER")
-        view = PersistentCampaignLauncherView(self, service_type=resolved_service_type, total_pages=len(embeds), page_map=page_map if isinstance(page_map, list) else [])
-        embed = await self._hydrate_stored_campaign_embed(
-            service_type=resolved_service_type,
-            embed_payload=embeds[index],
-            metadata=metadata if isinstance(metadata, dict) else None,
-        )
-        await interaction.response.edit_message(embed=embed, view=view)
-        return True
 
     def _build_page_map(self, service_type: str, *, payload_embeds: list[Any], payload: dict[str, Any] | None) -> list[dict[str, Any]]:
         if service_type == "NEWS":

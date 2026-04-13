@@ -26,7 +26,7 @@ def test_db_has_campaign_content_tables_and_index() -> None:
 def test_persistent_views_registration_uses_dynamic_campaign_views() -> None:
     source = Path("app/services/campaign_content_service.py").read_text()
     assert "Dynamic persistent views are re-created per message from DB metadata" in source
-    assert "PersistentCampaignLauncherView" in source
+    assert "channel.send(embed=embeds[0])" in source
 
 
 def test_db_lists_next_recurring_campaign_content_runs() -> None:

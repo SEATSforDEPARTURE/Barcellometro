@@ -89,6 +89,7 @@ WEATHER_AREA_LABELS = {
 }
 
 HOROSCOPE_SECTIONS = ["love", "work", "money", "energy", "friction", "advice"]
+WEATHER_AREAS = ["nord", "centro", "sud_e_isole"]
 
 
 def resolve_color(color_raw: str | None) -> int:
@@ -1287,21 +1288,25 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
     thermal_range = f"{round(min(all_temps), 1)}°C - {round(max(all_temps), 1)}°C" if all_temps else "n/d"
     tone = _time_of_day_label(_overview_now(payload))
 
-    pages: list[tuple[str, str, str]] = [
+    selected_areas = {slugify_label(item) for item in str(config.get("categories_json") or "").split(",") if str(item).strip()}
+    if not selected_areas:
+        selected_areas = set(WEATHER_AREAS)
+
+    overview = discord.Embed(title=format_standard_title(f"{title} • Overview Italia"), color=color)
+    overview.description = format_standard_description(
         (
-            "Overview Italia",
-            (
-                "🇮🇹 Situazione generale aggregata dalle aree monitorate.\n"
-                f"🐹 Buona {tone}: il Barcellometro ha preso il microfono del meteo nazionale.\n"
-                f"⚡ Area più instabile: **{most_unstable}**\n"
-                f"🌤️ Area più serena: **{most_calm}**\n"
-                f"🌡️ Range termico nazionale: **{thermal_range}**\n"
-                "Clicca i pulsanti qui sotto per il dettaglio di ogni area."
-            ),
-            "Consiglio cricetoso: controlla il meteo prima di uscire e vesti a strati intelligenti.",
-        )
-    ]
+            "🇮🇹 Situazione generale aggregata dalle aree monitorate.\n"
+            f"🐹 Buona {tone}: il Barcellometro ha preso il microfono del meteo nazionale.\n"
+            f"⚡ Area più instabile: **{most_unstable}**\n"
+            f"🌤️ Area più serena: **{most_calm}**\n"
+            f"🌡️ Range termico nazionale: **{thermal_range}**"
+        ),
+        blank_line_before_fields=True,
+    )
+
     for region in ["Nord", "Centro", "Sud e Isole"]:
+        if slugify_label(region) not in selected_areas:
+            continue
         area_payload = regions.get(region, {})
         area_payload = area_payload if isinstance(area_payload, dict) else {"sampled_cities": area_payload}
         entries = area_payload.get("sampled_cities", [])
@@ -1310,34 +1315,18 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
             row.append(
                 f"**{entry.get('city', 'Città')}** · {entry.get('temperature', 'n/d')}°C · vento {entry.get('windspeed', 'n/d')} km/h · {entry.get('condition', 'condizioni variabili')}"
             )
-        pages.append(
-            (
-                region,
-                "\n".join(row) or "Dati non disponibili",
-                f"🐹 Focus area: {area_payload.get('precipitation_summary', 'situazione in aggiornamento')} · {area_payload.get('wind_summary', 'vento in osservazione')}",
-            )
+        value = "\n".join(row) or "Dati non disponibili"
+        focus = f"🐹 Focus area: {area_payload.get('precipitation_summary', 'situazione in aggiornamento')} · {area_payload.get('wind_summary', 'vento in osservazione')}"
+        overview.add_field(
+            name=format_standard_field_name(region.upper(), emoji="📍"),
+            value=f"{value[:780]}\n{focus[:220]}",
+            inline=False,
         )
-    embeds: list[discord.Embed] = []
-    for page_title, description, comment in pages:
-        page_intro = description[:1024] if page_title == "Overview Italia" else "Dettaglio meteo sintetico dell'area selezionata."
-        e = discord.Embed(
-            title=format_standard_title(f"{title} • {page_title}"),
-            description=page_intro,
-            color=color,
-        )
-        e.add_field(name=format_standard_field_name("Situazione", emoji="🧾"), value=description[:1024], inline=False)
-        e.add_field(name=format_standard_field_name("Commento"), value=comment[:1024], inline=False)
-        embeds.append(e)
-    return _apply_campaign_footer(embeds, service_name="campagne_meteo")
+    return _apply_campaign_footer([overview], service_name="campagne_meteo")
 
 
 def build_weather_page_map() -> list[dict[str, Any]]:
-    return [
-        {"type": "overview", "key": "overview", "label": "Overview Italia", "page": 0},
-        {"type": "area", "key": "nord", "label": get_weather_area_label("Nord"), "page": 1},
-        {"type": "area", "key": "centro", "label": get_weather_area_label("Centro"), "page": 2},
-        {"type": "area", "key": "sud_e_isole", "label": get_weather_area_label("Sud e Isole"), "page": 3},
-    ]
+    return [{"type": "overview", "key": "overview", "label": "Overview Italia", "page": 0}]
 
 
 def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
@@ -1358,34 +1347,37 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     mood = ", ".join(mood_parts[:4]) or "variegato"
     tone = _time_of_day_label(_overview_now(payload))
 
-    embeds: list[discord.Embed] = []
+    selected_signs = {slugify_label(item) for item in str(config.get("categories_json") or "").split(",") if str(item).strip()}
+    if not selected_signs:
+        selected_signs = {slugify_label(sign) for sign in SIGN_ORDER}
+
     overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
-    overview.description = (
+    overview.description = format_standard_description((
         f"🐹 Speciale oroscopo di **{tone}**: il Barcellometro ha lucidato le sfere e acceso lo studio stellare.\n"
         f"Clima zodiacale generale: **{mood}**.\n"
         f"Segni in forma: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in top)}\n"
-        f"Segni da trattare con più tatto: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}\n"
-        "Per il dettaglio del tuo segno, clicca i pulsanti qui sotto."
-    )
-    embeds.append(overview)
+        f"Segni da trattare con più tatto: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}"
+    ), blank_line_before_fields=True)
     for sign in SIGN_ORDER:
+        if slugify_label(sign) not in selected_signs:
+            continue
         data = signs.get(sign, {})
-        e = discord.Embed(title=format_standard_title(f"{title} • {sign}"), color=color)
-        e.add_field(name=format_standard_field_name("Amore", emoji="❤️"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("love") or "Cuore in fase di analisi")), limit=280)[:1024], inline=False)
-        e.add_field(name=format_standard_field_name("Lavoro / Studio", emoji="💼"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("work") or "Organizzati per priorità")), limit=280)[:1024], inline=False)
-        e.add_field(name=format_standard_field_name("Soldi", emoji="💰"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("money") or "Gestione prudente")), limit=240)[:1024], inline=False)
-        e.add_field(name=format_standard_field_name("Energia", emoji="⚡"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("energy") or "Energia variabile")), limit=220)[:1024], inline=False)
-        e.add_field(name=format_standard_field_name("Con chi barcellerai oggi", emoji="🔥"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("friction") or "Con chi ti mette fretta")), limit=220)[:1024], inline=False)
-        e.add_field(name=format_standard_field_name("Consiglio cricetoso", emoji="🐹"), value=trim_sentence_block(sanitize_horoscope_text(sign, str(data.get("advice") or "Piccoli passi, grandi risultati")), limit=220)[:1024], inline=False)
-        embeds.append(e)
-    return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")
+        summary = (
+            f"❤️ {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('love') or 'Cuore in fase di analisi')), limit=120)}\n"
+            f"💼 {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('work') or 'Organizzati per priorità')), limit=120)}\n"
+            f"💰 {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('money') or 'Gestione prudente')), limit=120)}\n"
+            f"⚡ {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('energy') or 'Energia variabile')), limit=120)}"
+        )
+        overview.add_field(
+            name=format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")),
+            value=summary[:1024],
+            inline=False,
+        )
+    return _apply_campaign_footer([overview], service_name="campagne_oroscopo")
 
 
 def build_horoscope_page_map() -> list[dict[str, Any]]:
-    page_map: list[dict[str, Any]] = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
-    for i, sign in enumerate(SIGN_ORDER, start=1):
-        page_map.append({"type": "sign", "key": slugify_label(sign), "label": f"{SIGN_EMOJIS.get(sign, '✨')} {sign.upper()}", "page": i})
-    return page_map
+    return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
 
 def build_fallback_embed(config: dict[str, Any], sources: list[str], *, service_name: str = "campagne_notizie") -> list[discord.Embed]:

@@ -44,9 +44,11 @@ def test_build_weather_embeds_page_order() -> None:
     )
     titles = [_normalize_standardized_title(e.title) for e in embeds]
     assert "OVERVIEW ITALIA" in titles[0]
-    assert "NORD" in titles[1]
-    assert "CENTRO" in titles[2]
-    assert "SUD E ISOLE" in titles[3]
+    assert len(embeds) == 1
+    names = [field.name for field in embeds[0].fields]
+    assert any("NORD" in name for name in names)
+    assert any("CENTRO" in name for name in names)
+    assert any("SUD E ISOLE" in name for name in names)
 
 
 def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
@@ -350,8 +352,9 @@ def test_build_horoscope_embeds_strip_inner_headings() -> None:
     for s in ["Ariete","Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Pesci"]:
         payload["signs"][s] = {"love":"ok","work":"ok","money":"ok","energy":"ok","friction":"ok","advice":"ok","confidence":1}
     embeds = build_horoscope_embeds({"embed_title": "🔮 OROSCOPO CRICETOSO"}, payload)
-    acquario = next(e for e in embeds if "ACQUARIO" in _normalize_standardized_title(e.title))
-    values = " ".join(f.value for f in acquario.fields)
+    assert len(embeds) == 1
+    acquario_field = next(field for field in embeds[0].fields if "ACQUARIO" in field.name)
+    values = acquario_field.value or ""
     assert "Love Alert" not in values
     assert "Energia del genio" not in values
 
@@ -564,44 +567,6 @@ def test_load_message_record_handles_invalid_json() -> None:
         assert row is not None
         assert row["embeds"] == []
         assert row["metadata"] == {}
-
-    asyncio.run(_run())
-
-
-def test_open_personal_navigator_clamps_target_index() -> None:
-    class _Db:
-        async def get_campaign_content_message(self, _message_id):
-            return {
-                "message_id": "777",
-                "guild_id": "1",
-                "channel_id": "2",
-                "service_type": "WEATHER",
-                "config_id": "9",
-                "embeds_json": '[{"title":"P0"},{"title":"P1"}]',
-                "metadata_json": '{"page_map": [{"type": "overview", "page": 0}]}',
-                "current_index": 0,
-            }
-
-    class _Response:
-        def __init__(self):
-            self.send_message = AsyncMock()
-            self._done = False
-
-        def is_done(self):
-            return self._done
-
-    interaction = SimpleNamespace(message=SimpleNamespace(id=777), response=_Response())
-
-    async def _run() -> None:
-        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
-        ok_low = await service.open_personal_navigator(interaction, target_index=-5, service_type="WEATHER")
-        ok_high = await service.open_personal_navigator(interaction, target_index=55, service_type="WEATHER")
-        assert ok_low is True and ok_high is True
-        calls = interaction.response.send_message.await_args_list
-        low_embed = calls[0].kwargs["embed"]
-        high_embed = calls[1].kwargs["embed"]
-        assert (low_embed.title or "") == "P0"
-        assert (high_embed.title or "") == "P1"
 
     asyncio.run(_run())
 

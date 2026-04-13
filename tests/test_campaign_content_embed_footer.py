@@ -52,10 +52,8 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
         },
     )
 
+    assert len(embeds) == 1
     assert _title_inner_without_emoji(embeds[0].title or "") == "METEO CRICETOSO • OVERVIEW ITALIA"
-    assert _title_inner_without_emoji(embeds[1].title or "") == "METEO CRICETOSO • NORD"
-    assert _title_inner_without_emoji(embeds[2].title or "") == "METEO CRICETOSO • CENTRO"
-    assert _title_inner_without_emoji(embeds[3].title or "") == "METEO CRICETOSO • SUD E ISOLE"
     footer_meta = [get_footer_meta(embed) for embed in embeds]
     assert all(meta is not None for meta in footer_meta)
     assert {meta.service_name for meta in footer_meta if meta is not None} == {"campagne_meteo"}
@@ -78,8 +76,8 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
     )
     assert "HAMSTER NEWS • EDIZIONE" in _title_inner_without_emoji(news[0].title or "")
     assert len(news) == 1
+    assert len(horoscope) == 1
     assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO DEL GIORNO • INIZIO"
-    assert _title_inner_without_emoji(horoscope[1].title or "") == "OROSCOPO DEL GIORNO • ARIETE"
     news_meta = [get_footer_meta(embed) for embed in news]
     horoscope_meta = [get_footer_meta(embed) for embed in horoscope]
     assert all(meta is not None for meta in news_meta)
@@ -274,9 +272,9 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
     )
 
     assert "Barcellometro" in (weather[0].description or "")
-    assert "Clicca i pulsanti" in (weather[0].description or "")
+    assert "Clicca i pulsanti" not in (weather[0].description or "")
     assert "Barcellometro" in (horoscope[0].description or "")
-    assert "pulsanti" in (horoscope[0].description or "").lower()
+    assert "pulsanti" not in (horoscope[0].description or "").lower()
 
 
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:
@@ -311,8 +309,8 @@ def test_campaign_formatter_applies_footer_meta_in_all_builders() -> None:
     source = Path("app/services/campaign_content_formatter.py").read_text()
     assert 'def _apply_campaign_footer' in source
     assert 'return _apply_campaign_footer([overview], service_name="campagne_notizie")' in source
-    assert 'return _apply_campaign_footer(embeds, service_name="campagne_meteo")' in source
-    assert 'return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")' in source
+    assert 'return _apply_campaign_footer([overview], service_name="campagne_meteo")' in source
+    assert 'return _apply_campaign_footer([overview], service_name="campagne_oroscopo")' in source
     assert 'return _apply_campaign_footer([embed], service_name=service_name)' in source
 
 
