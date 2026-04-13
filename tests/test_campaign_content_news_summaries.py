@@ -7,8 +7,17 @@ from app.services.campaign_content_formatter import (
 )
 
 
+_FINAL_EMOJI_RE = re.compile(r"\s+[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]\s*$")
+
+
+def _strip_single_final_emoji(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text.strip())
+    return _FINAL_EMOJI_RE.sub("", normalized).strip()
+
+
 def _sentence_count(text: str) -> int:
-    return len([s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()])
+    normalized = _strip_single_final_emoji(text)
+    return len([s for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()])
 
 
 def test_news_summary_is_single_sentence_with_one_final_emoji() -> None:

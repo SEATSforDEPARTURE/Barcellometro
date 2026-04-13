@@ -325,7 +325,8 @@ def test_news_rewrite_falls_back_when_ai_fails() -> None:
         item = payload["categories"]["cronaca"][0]
         assert item["summary_fallback_used"] is True
         assert "ai_summary" in item
-        assert "👀" not in item["ai_summary"]
+        assert not item["ai_summary"].lstrip().startswith(("👀", "🤹", "📈", "⚡", "🎭", "🫥", "😔"))
+        assert item["ai_summary"].endswith(("👀", "🤹", "📈", "⚡", "🎭", "🫥", "😔"))
         assert "Terza frase da ignorare." not in item["ai_summary"]
 
     asyncio.run(_run())
