@@ -499,8 +499,30 @@ def test_news_schedule_add_command_exposes_autocomplete() -> None:
 
 def test_weather_and_horoscope_schedule_commands_expose_guided_autocomplete() -> None:
     source = Path("app/plugins/commands_modular/messaggi.py").read_text(encoding="utf-8")
-    assert "@app_commands.autocomplete(categories=_weather_areas_autocomplete)" in source
-    assert "@app_commands.autocomplete(categories=_horoscope_signs_autocomplete)" in source
+    assert "@app_commands.autocomplete(sources=_weather_sources_autocomplete, categories=_weather_areas_autocomplete)" in source
+    assert "@app_commands.autocomplete(sources=_horoscope_sources_autocomplete, categories=_horoscope_signs_autocomplete)" in source
+
+
+def test_weather_sources_autocomplete_filters_and_excludes_selected(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "open-meteo, m",
+        allowed_values=messaggi_module.WEATHER_SOURCE_CHOICES,
+        preferred_labels=messaggi_module.WEATHER_SOURCE_LABELS,
+    )
+    values = [choice.value for choice in choices]
+    assert "open-meteo, meteoam" in values
+    assert all("open-meteo, open-meteo" not in value for value in values)
+
+
+def test_horoscope_sources_autocomplete_is_scoped_to_horoscope_providers(messaggi_module) -> None:
+    choices = messaggi_module._compose_guided_csv_suggestions(
+        "",
+        allowed_values=messaggi_module.HOROSCOPE_SOURCE_CHOICES,
+        preferred_labels=messaggi_module.HOROSCOPE_SOURCE_LABELS,
+    )
+    names = [choice.name for choice in choices]
+    assert "ohmanda" in names
+    assert "open-meteo" not in names
 
 
 def test_weather_schedule_add_normalizes_selected_areas(messaggi_module) -> None:
@@ -519,6 +541,39 @@ def test_weather_schedule_add_normalizes_selected_areas(messaggi_module) -> None
     asyncio.run(_run())
 
 
+def test_weather_schedule_add_normalizes_sources_and_persists_backend_format(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "schedule_add")
+        await callback(_FakeInteraction(), sources="OPEN-METEO, meteoam, open-meteo")
+        assert db.created_service_payload["sources_json"] == '["open-meteo", "meteoam"]'
+
+    asyncio.run(_run())
+
+
+def test_weather_schedule_add_rejects_unsupported_sources(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        weather_group = _get_subgroup(group, "weather")
+        callback = _get_command_callback(weather_group, "schedule_add")
+        await callback(_FakeInteraction(), sources="unsupported-provider")
+        assert db.created_service_payload is None
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
 def test_horoscope_schedule_add_rejects_unsupported_signs(messaggi_module) -> None:
     async def _run() -> None:
         db = _FakeDb()
@@ -530,6 +585,39 @@ def test_horoscope_schedule_add_rejects_unsupported_signs(messaggi_module) -> No
         horoscope_group = _get_subgroup(group, "horoscope")
         callback = _get_command_callback(horoscope_group, "schedule_add")
         await callback(_FakeInteraction(), categories="Ariete, SegnoInventato")
+        assert db.created_service_payload is None
+        assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
+
+    asyncio.run(_run())
+
+
+def test_horoscope_schedule_add_normalizes_sources_and_persists_backend_format(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        horoscope_group = _get_subgroup(group, "horoscope")
+        callback = _get_command_callback(horoscope_group, "schedule_add")
+        await callback(_FakeInteraction(), sources="OHMANDA, astrocenter, ohmanda")
+        assert db.created_service_payload["sources_json"] == '["ohmanda", "astrocenter"]'
+
+    asyncio.run(_run())
+
+
+def test_horoscope_schedule_add_rejects_unsupported_sources(messaggi_module) -> None:
+    async def _run() -> None:
+        db = _FakeDb()
+        scheduler = _FakeScheduler()
+        scheduler.is_valid_embed_color = lambda _: True
+        ctx = SimpleNamespace(database=db, message_scheduler=scheduler, timezone=timezone.utc, footer=object())
+        group = discord.app_commands.Group(name="campaigns", description="x")
+        messaggi_module.register_messaggi(group, ctx)
+        horoscope_group = _get_subgroup(group, "horoscope")
+        callback = _get_command_callback(horoscope_group, "schedule_add")
+        await callback(_FakeInteraction(), sources="unsupported-provider")
         assert db.created_service_payload is None
         assert messaggi_module.send_standard_response.await_args.kwargs["kind"] == "error"
 
