@@ -73,12 +73,12 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         )
     horoscope = build_horoscope_embeds(
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
-        {"signs": {"Ariete": {"text": "Focus"}}},
+        {"generated_at": "2026-04-09T08:30:00+00:00", "signs": {"Ariete": {"text": "Focus"}}},
     )
     assert "HAMSTER NEWS • EDIZIONE" in _title_inner_without_emoji(news[0].title or "")
     assert len(news) == 1
     assert len(horoscope) == 1
-    assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO DEL GIORNO • INIZIO"
+    assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO CRICETOSO • EDIZIONE MATTUTINA"
     news_meta = [get_footer_meta(embed) for embed in news]
     horoscope_meta = [get_footer_meta(embed) for embed in horoscope]
     assert all(meta is not None for meta in news_meta)
@@ -279,8 +279,44 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
     assert "**Buona sera** 🐹" in weather_description
     assert not weather_description.lstrip("* ").startswith("🐹")
     assert "Clicca i pulsanti" not in (weather[0].description or "")
-    assert "Barcellometro" in (horoscope[0].description or "")
+    horoscope_description = horoscope[0].description or ""
+    assert horoscope_description.startswith("*")
+    assert "**Buona sera** 🐹" in horoscope_description
+    assert "**Barcellometro in regia**" in horoscope_description
+    assert not horoscope_description.lstrip("* ").startswith("🐹")
+    assert "**Segni in forma**" in horoscope_description
     assert "pulsanti" not in (horoscope[0].description or "").lower()
+
+
+def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> None:
+    horoscope = build_horoscope_embeds(
+        {"next_scheduled_run_at": "2026-04-09T17:30:00+00:00", "categories_json": "Ariete,Gemelli"},
+        {
+            "generated_at": "2026-04-09T14:30:00+00:00",
+            "signs": {
+                "Ariete": {"love": "Amore in crescita! Mantieni il ritmo.", "work": "Concentrati su un obiettivo. Evita distrazioni.", "money": "Spese da filtrare", "energy": "Alta e costante", "confidence": 0.95, "tone": "frizzante"},
+                "Gemelli": {"love": "Dialogo efficace", "work": "Proposte convincenti", "money": "Budget solido", "energy": "Molto alta", "confidence": 1.0, "tone": "reattivo"},
+                "Toro": {"love": "Pazienza", "work": "Passo lento", "money": "Prudenza", "energy": "Bassa", "confidence": 0.2, "tone": "cauto"},
+            },
+        },
+    )[0]
+    field_map = {field.name: field.value or "" for field in horoscope.fields}
+
+    assert horoscope.title == "🔮 __**OROSCOPO CRICETOSO • EDIZIONE POMERIDIANA**__"
+    assert "✨ __**SEGNI IN FORMA**__" in field_map
+    assert "🫶 __**SEGNI DA TRATTARE CON PIÙ TATTO**__" in field_map
+    assert "🌟 __**SEGNO DEL GIORNO**__" in field_map
+    assert field_map["✨ __**SEGNI IN FORMA**__"].startswith("• **")
+    assert field_map["🫶 __**SEGNI DA TRATTARE CON PIÙ TATTO**__"].startswith("• **")
+    assert field_map["🌟 __**SEGNO DEL GIORNO**__"].splitlines()[0].startswith("• **")
+    assert field_map["♈ __**ARIETE**__"].startswith("• **Amore ❤️:** ")
+    assert field_map["♈ __**ARIETE**__"].count("\n") == 3
+    assert "• **Lavoro 💼:**" in field_map["♈ __**ARIETE**__"]
+    assert "• **Soldi 💰:**" in field_map["♈ __**ARIETE**__"]
+    assert "• **Energia ⚡:**" in field_map["♈ __**ARIETE**__"]
+    assert "🔜 __**PROSSIMA EDIZIONE**__" in field_map
+    assert field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("• Il criceto chiude il taccuino stellare per ora.")
+    assert "• Ci rivediamo alle **19:30** con la prossima edizione." in field_map["🔜 __**PROSSIMA EDIZIONE**__"]
 
 
 def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
