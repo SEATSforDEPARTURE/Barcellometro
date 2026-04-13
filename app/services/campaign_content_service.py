@@ -147,6 +147,9 @@ class CampaignContentService:
     async def execute_weather_service(self, config: dict[str, Any]) -> None:
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
         payload = fetch_weather_content(configured_sources)
+        next_run = await self._resolve_next_scheduled_run(config, service_type="WEATHER")
+        if next_run is not None:
+            config["next_scheduled_run_at"] = next_run.isoformat()
         try:
             used_model = await self._rewrite_weather_payload(payload)
         except Exception as exc:
@@ -318,17 +321,20 @@ class CampaignContentService:
         return self._resolve_ai_model_name("campaign_editorial") if used_ai else None
 
     async def _resolve_next_news_scheduled_run(self, config: dict[str, Any]) -> datetime | None:
+        return await self._resolve_next_scheduled_run(config, service_type="NEWS")
+
+    async def _resolve_next_scheduled_run(self, config: dict[str, Any], *, service_type: str) -> datetime | None:
         guild_id = str(config.get("guild_id") or "").strip()
         channel_id = str(config.get("channel_id") or "").strip()
-        service_type = str(config.get("service_type") or "NEWS").upper()
-        if not guild_id or not channel_id or service_type != "NEWS":
+        normalized_service = str(config.get("service_type") or service_type).upper()
+        if not guild_id or not channel_id or normalized_service != service_type:
             return None
         if not hasattr(self._database, "list_campaign_content_recurring_schedule_runs"):
             return None
         rows = await self._database.list_campaign_content_recurring_schedule_runs(
             guild_id=guild_id,
             channel_id=channel_id,
-            service_type=service_type,
+            service_type=normalized_service,
             after_iso=datetime.now(timezone.utc).isoformat(),
         )
         if not rows:

@@ -54,7 +54,7 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
     )
 
     assert len(embeds) == 1
-    assert _title_inner_without_emoji(embeds[0].title or "") == "METEO CRICETOSO • OVERVIEW ITALIA"
+    assert "METEO ITALIA • EDIZIONE" in _title_inner_without_emoji(embeds[0].title or "")
     footer_meta = [get_footer_meta(embed) for embed in embeds]
     assert all(meta is not None for meta in footer_meta)
     assert {meta.service_name for meta in footer_meta if meta is not None} == {"campagne_meteo"}
@@ -273,10 +273,38 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
         },
     )
 
-    assert "Barcellometro" in (weather[0].description or "")
+    weather_description = weather[0].description or ""
+    assert weather_description.startswith("*")
+    assert "**Barcellometro in regia**" in weather_description
+    assert "**Buona sera** 🐹" in weather_description
+    assert not weather_description.lstrip("* ").startswith("🐹")
     assert "Clicca i pulsanti" not in (weather[0].description or "")
     assert "Barcellometro" in (horoscope[0].description or "")
     assert "pulsanti" not in (horoscope[0].description or "").lower()
+
+
+def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
+    weather = build_weather_embeds(
+        {"next_scheduled_run_at": "2026-04-09T17:30:00+00:00"},
+        {
+            "generated_at": "2026-04-09T14:30:00+00:00",
+            "regions": {
+                "Nord": {"sampled_cities": [{"city": "Milano", "temperature": 14.2, "windspeed": 10.6, "condition": "rovesci"}]},
+                "Centro": {"sampled_cities": [{"city": "Roma", "temperature": 19.2, "windspeed": 8.2, "condition": "coperto"}]},
+                "Sud": {"sampled_cities": [{"city": "Napoli", "temperature": 20.6, "windspeed": 7.2, "condition": "sereno"}]},
+                "Isole": {"sampled_cities": [{"city": "Palermo", "temperature": 18.1, "windspeed": 11.0, "condition": "variabile"}]},
+            },
+        },
+    )[0]
+    field_map = {field.name: field.value or "" for field in weather.fields}
+    assert field_map["🌩️ __**AREA PIÙ INSTABILE**__"].startswith("• **")
+    assert field_map["🌤️ __**AREA PIÙ SERENA**__"].startswith("• **")
+    assert field_map["🌡️ __**RANGE TERMICO**__"].startswith("• **")
+    assert field_map["📍 __**NORD**__"].splitlines()[0].startswith("• ")
+    assert "• **Milano** · **14.2°C** · vento **10.6 km/h** · rovesci" in field_map["📍 __**NORD**__"]
+    assert "• **Focus area:**" in field_map["📍 __**NORD**__"]
+    assert field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("• Il criceto chiude il taccuino meteo per ora.")
+    assert "• Ci rivediamo alle **19:30** con la prossima edizione." in field_map["🔜 __**PROSSIMA EDIZIONE**__"]
 
 
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:
