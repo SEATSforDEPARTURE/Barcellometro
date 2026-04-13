@@ -1157,8 +1157,7 @@ def _next_news_run_field(config: dict[str, Any], *, generated_at: datetime) -> s
     )
 
 
-def _next_weather_run_field(config: dict[str, Any], *, generated_at: datetime) -> str | None:
-    _ = generated_at
+def _next_campaign_run_time(config: dict[str, Any]) -> datetime | None:
     next_run_raw = str(config.get("next_scheduled_run_at") or "").strip()
     if not next_run_raw:
         return None
@@ -1167,7 +1166,14 @@ def _next_weather_run_field(config: dict[str, Any], *, generated_at: datetime) -
     except ValueError:
         return None
     next_run = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-    next_run = next_run.astimezone(_ITALY_TZ)
+    return next_run.astimezone(_ITALY_TZ)
+
+
+def _next_weather_run_field(config: dict[str, Any], *, generated_at: datetime) -> str | None:
+    _ = generated_at
+    next_run = _next_campaign_run_time(config)
+    if next_run is None:
+        return None
     return (
         "• Il criceto chiude il taccuino meteo per ora.\n"
         f"• Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
@@ -1384,7 +1390,6 @@ def build_weather_page_map() -> list[dict[str, Any]]:
 
 def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
-    title = config.get("embed_title") or "🔮 Oroscopo cricetoso"
     signs = payload.get("signs", {})
     scored: list[tuple[str, float]] = []
     for sign in SIGN_ORDER:
@@ -1396,34 +1401,80 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     top = [name for name, _ in sorted(scored, key=lambda x: x[1], reverse=True)[:3]]
     delicate = [name for name, _ in sorted(scored, key=lambda x: x[1])[:3]]
 
-    mood_parts = [str(signs.get(sign, {}).get("tone") or "") for sign in SIGN_ORDER if signs.get(sign)]
-    mood = ", ".join(mood_parts[:4]) or "variegato"
-    tone = _time_of_day_label(_overview_now(payload))
+    mood_parts = [str(signs.get(sign, {}).get("tone") or "").strip() for sign in SIGN_ORDER if signs.get(sign)]
+    mood = ", ".join(part for part in mood_parts[:4] if part) or "variegato"
+    now_utc = _overview_now(payload)
+    edition_label, daypart = news_edition_label_for_datetime(now_utc)
+    greeting = NEWS_DAYPART_GREETING.get(daypart, NEWS_DAYPART_GREETING["pomeriggio"])
 
     selected_signs = {slugify_label(item) for item in str(config.get("categories_json") or "").split(",") if str(item).strip()}
     if not selected_signs:
         selected_signs = {slugify_label(sign) for sign in SIGN_ORDER}
 
-    overview = discord.Embed(title=format_standard_title(f"{title} • Inizio"), color=color)
+    overview = discord.Embed(title=f"🔮 {format_standard_title(f'OROSCOPO CRICETOSO • {edition_label}')}", color=color)
     overview.description = format_standard_description((
-        f"🐹 Speciale oroscopo di **{tone}**: il Barcellometro ha lucidato le sfere e acceso lo studio stellare.\n"
-        f"Clima zodiacale generale: **{mood}**.\n"
-        f"Segni in forma: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in top)}\n"
-        f"Segni da trattare con più tatto: {', '.join(f'{SIGN_EMOJIS[s]} {s}' for s in delicate)}"
+        f"**{greeting}** 🐹: qui **Barcellometro in regia**, con il quadro zodiacale della giornata. "
+        f"**Segni in forma**, **vibrazioni da tenere d'occhio** e **stelle dritte al punto**."
     ), blank_line_before_fields=True)
+    top_list = ", ".join(f"**{sign}**" for sign in top) or "**n/d**"
+    delicate_list = ", ".join(f"**{sign}**" for sign in delicate) or "**n/d**"
+    sign_of_day = top[0] if top else "n/d"
+    overview.add_field(
+        name=format_standard_field_name("SEGNI IN FORMA", emoji="✨"),
+        value=f"• {top_list}",
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("SEGNI DA TRATTARE CON PIÙ TATTO", emoji="🫶"),
+        value=f"• {delicate_list}",
+        inline=False,
+    )
+    overview.add_field(
+        name=format_standard_field_name("SEGNO DEL GIORNO", emoji="🌟"),
+        value=(
+            f"• **{sign_of_day}**\n"
+            f"• Oggi ha il passo più brillante del gruppo e sfrutta bene le occasioni che passano: "
+            f"il clima resta **{mood}** ma qui si gioca con più ritmo. ✨"
+        ),
+        inline=False,
+    )
+
+    def _single_sentence(value: str, *, fallback: str, emoji: str) -> str:
+        cleaned = sanitize_plain_text(value)
+        if not cleaned:
+            cleaned = fallback
+        parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+        sentence = parts[0] if parts else fallback
+        sentence = trim_sentence_block(sentence, limit=150)
+        if sentence.endswith(("❤️", "💼", "💰", "⚡")):
+            return sentence
+        if not sentence.endswith((".", "!", "?")):
+            sentence = f"{sentence}."
+        return f"{sentence} {emoji}"
+
     for sign in SIGN_ORDER:
         if slugify_label(sign) not in selected_signs:
             continue
         data = signs.get(sign, {})
         summary = (
-            f"❤️ {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('love') or 'Cuore in fase di analisi')), limit=120)}\n"
-            f"💼 {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('work') or 'Organizzati per priorità')), limit=120)}\n"
-            f"💰 {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('money') or 'Gestione prudente')), limit=120)}\n"
-            f"⚡ {trim_sentence_block(sanitize_horoscope_text(sign, str(data.get('energy') or 'Energia variabile')), limit=120)}"
+            f"• **Amore ❤️:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('love') or '')), fallback='Meglio parlare chiaro e senza giri strani', emoji='❤️')}\n"
+            f"• **Lavoro 💼:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('work') or '')), fallback='Serve una priorità netta per non disperdere energie', emoji='💼')}\n"
+            f"• **Soldi 💰:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('money') or '')), fallback='Tieni il budget sotto controllo prima delle spese impulsive', emoji='💰')}\n"
+            f"• **Energia ⚡:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('energy') or '')), fallback='Buona carica, ma va incanalata con più equilibrio', emoji='⚡')}"
         )
         overview.add_field(
             name=format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")),
             value=summary[:1024],
+            inline=False,
+        )
+    next_run = _next_campaign_run_time(config)
+    if next_run is not None:
+        overview.add_field(
+            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
+            value=(
+                "• Il criceto chiude il taccuino stellare per ora.\n"
+                f"• Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
+            ),
             inline=False,
         )
     return _apply_campaign_footer([overview], service_name="campagne_oroscopo")
