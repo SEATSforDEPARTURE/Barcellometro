@@ -47,7 +47,8 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
             "regions": {
                 "Nord": [{"city": "Milano", "temperature": 22, "windspeed": 8}],
                 "Centro": [{"city": "Roma", "temperature": 25, "windspeed": 5}],
-                "Sud e Isole": [{"city": "Palermo", "temperature": 28, "windspeed": 11}],
+                "Sud": [{"city": "Napoli", "temperature": 27, "windspeed": 10}],
+                "Isole": [{"city": "Palermo", "temperature": 28, "windspeed": 11}],
             }
         },
     )
@@ -259,7 +260,8 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
             "regions": {
                 "Nord": {"sampled_cities": [{"city": "Milano", "temperature": 21, "windspeed": 10, "condition": "pioggia"}]},
                 "Centro": {"sampled_cities": [{"city": "Roma", "temperature": 24, "windspeed": 8, "condition": "sereno"}]},
-                "Sud e Isole": {"sampled_cities": [{"city": "Palermo", "temperature": 29, "windspeed": 6, "condition": "sereno"}]},
+                "Sud": {"sampled_cities": [{"city": "Napoli", "temperature": 27, "windspeed": 7, "condition": "sereno"}]},
+                "Isole": {"sampled_cities": [{"city": "Palermo", "temperature": 29, "windspeed": 6, "condition": "sereno"}]},
             },
         },
     )

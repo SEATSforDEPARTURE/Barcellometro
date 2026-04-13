@@ -55,7 +55,8 @@ WEATHER_AREA_CHOICES = [str(area).strip().lower() for area in WEATHER_AREAS]
 WEATHER_AREA_LABELS = {
     "nord": "Nord",
     "centro": "Centro",
-    "sud_e_isole": "Sud e Isole",
+    "sud": "Sud",
+    "isole": "Isole",
 }
 HOROSCOPE_SIGN_CHOICES = [str(sign).strip().lower() for sign in SIGN_ORDER]
 HOROSCOPE_SIGN_LABELS = {str(sign).strip().lower(): str(sign).strip() for sign in SIGN_ORDER}
@@ -138,6 +139,14 @@ def _normalize_csv_values(raw: Optional[str]) -> list[str]:
         seen.add(token)
         normalized.append(token)
     return normalized
+
+
+def _weather_areas_error_message(invalid_categories: list[str]) -> str:
+    raw = ", ".join(invalid_categories)
+    hint_patterns = ("sud e isole", "sud ed isole", "sud & isole", "sud + isole")
+    if any(token in hint_patterns for token in invalid_categories):
+        return f"Unsupported areas: {raw}. Use separate values like: sud,isole."
+    return f"Unsupported areas: {raw}."
 
 
 def _parse_guided_csv_values(
@@ -1355,7 +1364,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             await _send(
                 interaction,
                 subcommand_path="campaigns weather schedule_add",
-                lines=[("error", f"Unsupported areas: {', '.join(invalid_categories)}.")],
+                lines=[("error", _weather_areas_error_message(invalid_categories))],
                 kind="error",
             )
             return
@@ -1410,7 +1419,7 @@ def register_messaggi(campaigns_group: app_commands.Group, ctx: CommandContext, 
             await _send(
                 interaction,
                 subcommand_path="campaigns weather schedule_edit",
-                lines=[("error", f"Unsupported areas: {', '.join(invalid_categories)}.")],
+                lines=[("error", _weather_areas_error_message(invalid_categories))],
                 kind="error",
             )
             return

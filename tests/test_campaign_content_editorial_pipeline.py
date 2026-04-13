@@ -40,7 +40,7 @@ def _normalize_standardized_title(title: str | None) -> str:
 def test_build_weather_embeds_page_order() -> None:
     embeds = build_weather_embeds(
         {"embed_title": "🌤️ METEO CRICETOSO"},
-        {"regions": {"Nord": {"sampled_cities": []}, "Centro": {"sampled_cities": []}, "Sud e Isole": {"sampled_cities": []}}},
+        {"regions": {"Nord": {"sampled_cities": []}, "Centro": {"sampled_cities": []}, "Sud": {"sampled_cities": []}, "Isole": {"sampled_cities": []}}},
     )
     titles = [_normalize_standardized_title(e.title) for e in embeds]
     assert "OVERVIEW ITALIA" in titles[0]
@@ -48,7 +48,25 @@ def test_build_weather_embeds_page_order() -> None:
     names = [field.name for field in embeds[0].fields]
     assert any("NORD" in name for name in names)
     assert any("CENTRO" in name for name in names)
-    assert any("SUD E ISOLE" in name for name in names)
+    assert any("SUD" in name for name in names)
+    assert any("ISOLE" in name for name in names)
+    assert all("SUD E ISOLE" not in name for name in names)
+
+
+def test_weather_embed_renders_sud_and_isole_as_distinct_fields_when_both_selected() -> None:
+    embeds = build_weather_embeds(
+        {"embed_title": "🌤️ METEO CRICETOSO", "categories_json": "sud,isole"},
+        {
+            "regions": {
+                "Sud": {"sampled_cities": [{"city": "Napoli", "temperature": 27, "windspeed": 8, "condition": "sereno"}]},
+                "Isole": {"sampled_cities": [{"city": "Palermo", "temperature": 28, "windspeed": 9, "condition": "sereno"}]},
+            }
+        },
+    )
+    names = [field.name for field in embeds[0].fields]
+    assert any("SUD" in name for name in names)
+    assert any("ISOLE" in name for name in names)
+    assert all("SUD E ISOLE" not in name for name in names)
 
 
 def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
