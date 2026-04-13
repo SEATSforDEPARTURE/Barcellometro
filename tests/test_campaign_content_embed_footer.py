@@ -242,7 +242,7 @@ def test_news_minimal_fallback_used_only_when_all_text_is_empty() -> None:
     news = build_news_embeds({}, payload)
     field_value = news[0].fields[0].value or ""
     assert "Dettagli in aggiornamento." in field_value
-    assert any(emoji in field_value for emoji in ("👀", "🐹", "🤹", "🫥", "😔"))
+    assert any(emoji in field_value for emoji in ("👀", "🤹", "📈", "⚡", "🎭", "🫥", "😔"))
 
 
 def test_news_fallback_embed_uses_campaigns_author_service_label() -> None:

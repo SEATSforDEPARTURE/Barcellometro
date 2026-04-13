@@ -15,8 +15,17 @@ from app.services.campaign_content_formatter import build_news_embeds
 from app.services.campaign_content_service import CampaignContentService
 
 
+_FINAL_EMOJI_RE = re.compile(r"\s+[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]\s*$")
+
+
+def _strip_single_final_emoji(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text.strip())
+    return _FINAL_EMOJI_RE.sub("", normalized).strip()
+
+
 def _sentence_count(text: str) -> int:
-    return len([s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()])
+    normalized = _strip_single_final_emoji(text)
+    return len([s for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()])
 
 
 def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -> None:
@@ -28,7 +37,11 @@ def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -
         },
     )
     description = embeds[0].description or ""
-    assert description.startswith("**Buona sera**")
+    unwrapped = description.strip()
+    if unwrapped.startswith("*") and unwrapped.endswith("*"):
+        unwrapped = unwrapped[1:-1].strip()
+    assert unwrapped.startswith("**Buona sera**")
+    assert not unwrapped.startswith(("👀", "🤹", "📈", "⚡", "🎭", "🫥", "😔", "🐹", "📰"))
     assert "**Barcellometro in regia**" in description
     assert "**Titoli caldi**" in description
     assert "**dritti al punto**" in description
