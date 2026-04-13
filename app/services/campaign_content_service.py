@@ -62,8 +62,16 @@ _NEWS_EMOJI_RE = re.compile(
 _NEWS_BOT_OPENING_RE = re.compile(
     r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|clima teso|notizia pesante)\b"
 )
-_NEWS_MAX_BODY_SENTENCES = 2
+_NEWS_MAX_BODY_SENTENCES = 1
 _NEWS_MAX_BODY_CHARS = 280
+_NEWS_EDITORIAL_TAIL_RE = re.compile(
+    r"(?i)\b(?:insomma|qui la ruota gira|tema che farà|una vicenda che|notizia durissima|clima resta cupo)\b"
+)
+_NEWS_DELICATE_KEYWORDS = (
+    "morto", "morti", "morte", "vittime", "tragedia", "incidente", "omicidio", "guerra", "bombard", "sparatoria", "alluvione", "terremoto", "aggressione", "violenza",
+)
+_NEWS_LIGHT_FINAL_EMOJIS = ("👀", "🤹", "📈", "⚡", "🎭")
+_NEWS_SERIOUS_FINAL_EMOJIS = ("😔", "🫥")
 _COMMON_ENGLISH_NEWS_WORDS = {"the", "and", "with", "breaking", "update", "today", "after", "from", "that", "this"}
 _NEWS_EXTRA_ITALIAN_FALLBACKS = {
     "barzelletta": "Il criceto in redazione: «Promesso, oggi apro solo tre tab». Erano trenta.",
@@ -455,12 +463,13 @@ class CampaignContentService:
             fields.append(f"Pubblicata: {published_at}")
         return (
             "Ricevi solo titolo e breve contenuto di una notizia. "
-            "Scrivi in italiano un mini-riassunto in massimo 2 frasi. "
+            "Scrivi in italiano un mini-riassunto in una sola frase. "
             "Inizia subito dal contenuto della notizia. "
             "Usa esclusivamente le informazioni fornite: non aggiungere fatti esterni e non inventare dettagli. "
             "Niente introduzioni meta, niente riferimenti al prompt o al tuo ruolo, niente fonte nel testo. "
-            "Non aggiungere emoji. Non aggiungere commenti finali del bot. "
-            "Non fare introduzioni meta.\n"
+            "Nessun commento finale del bot. Tono simpatico solo su notizie non tristi; tono sobrio su notizie drammatiche. "
+            "Non iniziare con emoji. Usa al massimo una emoji finale coerente col tono, senza altro testo dopo. "
+            "Non mettere emoji in mezzo alla frase.\n"
             + "\n".join(fields)
         )
 
@@ -476,10 +485,21 @@ class CampaignContentService:
             return False, "meta_output", cleaned
         if re.search(r"<[^>]+>|```", cleaned):
             return False, "dirty_markup", cleaned
-        if self._news_summary_contains_emoji(cleaned):
-            return False, "emoji_not_allowed", cleaned
+        emoji_matches = list(_NEWS_EMOJI_RE.finditer(cleaned))
+        if len(emoji_matches) > 1:
+            return False, "emoji_multiple", cleaned
+        if emoji_matches:
+            emoji_match = emoji_matches[0]
+            if emoji_match.start() == 0:
+                return False, "emoji_at_start", cleaned
+            if cleaned[emoji_match.end():].strip():
+                return False, "emoji_not_final", cleaned
+            if cleaned[:emoji_match.start()].rstrip().endswith((".", "!", "?")):
+                return False, "emoji_after_second_sentence", cleaned
         if self._starts_with_bot_comment(cleaned):
             return False, "bot_comment_not_allowed", cleaned
+        if _NEWS_EDITORIAL_TAIL_RE.search(cleaned):
+            return False, "editorial_tail_not_allowed", cleaned
         sentence_count = len([s for s in re.split(r"(?<=[.!?])\s+", cleaned) if s.strip()])
         if sentence_count > _NEWS_MAX_BODY_SENTENCES:
             return False, "too_many_sentences", cleaned
@@ -510,6 +530,7 @@ class CampaignContentService:
         sanitized = sanitize_public_news_text(self._sanitize_news_summary_fallback(text))
         if not sanitized:
             return ""
+        sanitized = _NEWS_EMOJI_RE.sub("", sanitized).strip()
         sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", sanitized) if part.strip()]
         body = " ".join(sentences[:_NEWS_MAX_BODY_SENTENCES]).strip()
         if len(body) > _NEWS_MAX_BODY_CHARS:
@@ -517,6 +538,20 @@ class CampaignContentService:
         if body and not re.search(r"[.!?]\s*$", body):
             body = f"{body}."
         return body
+
+    @staticmethod
+    def _is_delicate_news(title: str, text: str) -> bool:
+        blob = f"{title} {text}".lower()
+        return any(token in blob for token in _NEWS_DELICATE_KEYWORDS)
+
+    @staticmethod
+    def _pick_news_mood_emoji(*, title: str, text: str) -> str:
+        if CampaignContentService._is_delicate_news(title, text):
+            palette = _NEWS_SERIOUS_FINAL_EMOJIS
+        else:
+            palette = _NEWS_LIGHT_FINAL_EMOJIS
+        key = f"{title}|{text}".strip().lower() or "news"
+        return palette[abs(hash(key)) % len(palette)]
 
     def _build_news_summary_fallback(self, *, title: str, cleaned_summary: str) -> str:
         base = sanitize_public_news_text(self._sanitize_news_summary_fallback(cleaned_summary))
@@ -529,11 +564,12 @@ class CampaignContentService:
                 base = re.sub(r"(?i)^(?:qui la faccenda|qui si parla di|in pratica|attenzione|clima teso|notizia pesante)\b[^:.\-]*[:.\-]?\s*", "", base).strip()
             body = self._build_news_summary_body(base)
             if body:
-                return body
+                return f"{body} {self._pick_news_mood_emoji(title=title, text=body)}".strip()
         title_clean = self._sanitize_news_input_text(title)
         if not title_clean:
             return "Aggiornamento in corso."
-        return self._build_news_summary_body(f"{title_clean}. Dettagli in aggiornamento.") or "Dettagli in aggiornamento."
+        body = self._build_news_summary_body(f"{title_clean}. Dettagli in aggiornamento.") or "Dettagli in aggiornamento."
+        return f"{body} {self._pick_news_mood_emoji(title=title_clean, text=body)}".strip()
 
     async def _normalize_news_extras_payload(self, payload: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}

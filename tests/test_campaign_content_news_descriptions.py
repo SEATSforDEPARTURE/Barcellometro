@@ -28,14 +28,15 @@ def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -
         },
     )
     description = embeds[0].description or ""
-    normalized = description.lstrip("*")
-    assert normalized.startswith("Buon sera")
-    assert "in regia 🐹" in description
+    assert description.startswith("**Buona sera**")
+    assert "**Barcellometro in regia**" in description
+    assert "**Titoli caldi**" in description
+    assert "**dritti al punto**" in description
     assert "📰" in description
     assert "Che ci racconta il mondo oggi?" in description
 
 
-def test_ultimora_and_in_evidenza_share_summary_pipeline_with_tail_comment_at_end() -> None:
+def test_ultimora_and_in_evidenza_share_summary_pipeline_with_single_sentence_summary() -> None:
     payload = {
         "categories": {
             "cronaca": [
@@ -64,11 +65,11 @@ def test_ultimora_and_in_evidenza_share_summary_pipeline_with_tail_comment_at_en
 
     for value in (ultimora_value, evidenza_value):
         summary_line = value.split("\n")[1]
-        summary_text = summary_line.removeprefix("• ").strip()
+        summary_text = summary_line.strip()
         assert not summary_text.startswith(("👀", "😵‍💫", "🤖", "😔", "🫥", "🐹", "🤹"))
-        assert not summary_line.lower().startswith(("• qui la faccenda", "• in pratica", "• attenzione"))
-        assert _sentence_count(summary_text) >= 2
-        assert any(summary_text.endswith(tail) for tail in ("👀", "🐹", "🤹", "🫥", "😔"))
+        assert not summary_line.lower().startswith(("qui la faccenda", "in pratica", "attenzione"))
+        assert _sentence_count(summary_text) == 1
+        assert any(summary_text.endswith(tail) for tail in ("👀", "🤹", "📈", "⚡", "🎭", "🫥", "😔"))
 
 
 def test_news_ai_validation_rejects_emoji_or_bot_comment_and_fallback_is_body_only() -> None:
@@ -80,7 +81,7 @@ def test_news_ai_validation_rejects_emoji_or_bot_comment_and_fallback_is_body_on
         source_summary="Aggiornamenti live.",
     )
     assert accepted is False
-    assert reason == "emoji_not_allowed"
+    assert reason == "emoji_at_start"
 
     accepted_comment, reason_comment, _ = service._is_acceptable_news_ai_summary(  # type: ignore[attr-defined]
         "Qui la faccenda si scalda: nuovi sviluppi in arrivo.",
@@ -96,5 +97,5 @@ def test_news_ai_validation_rejects_emoji_or_bot_comment_and_fallback_is_body_on
     )
     assert not fallback.lstrip().startswith(("👀", "😔", "🫥"))
     assert "qui la faccenda" not in fallback.lower()
-    assert all(emoji not in fallback for emoji in ("👀", "🫥", "😔", "🐹", "🤹"))
-    assert _sentence_count(fallback) <= 2
+    assert fallback.endswith(("👀", "🤹", "📈", "⚡", "🎭", "🫥", "😔"))
+    assert _sentence_count(fallback) == 1

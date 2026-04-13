@@ -107,10 +107,10 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
     assert "Che ci racconta il mondo oggi?" in description
-    assert "in regia 🐹" in description
+    assert "**Barcellometro in regia**" in description
     assert "📰" in description
     assert "📰" in description
-    assert any(greeting in description for greeting in ["Buon mattino", "Buon pomeriggio", "Buon sera"])
+    assert any(greeting in description for greeting in ["**Buongiorno**", "**Buon pomeriggio**", "**Buona sera**", "**Buonanotte**"])
     assert all(field.name != format_name for field in overview.fields for format_name in ["__**VARIE**__", "__**TITOLI IN EVIDENZA**__"])
 
 
@@ -144,7 +144,8 @@ def test_news_overview_field_copy_is_concise_and_has_source_line() -> None:
     field_value = news[0].fields[0].value
     assert field_value is not None
     assert field_value.count("\n") == 2
-    assert "\n• " in field_value
+    assert field_value.split("\n")[0].startswith("• **")
+    assert not field_value.split("\n")[1].startswith("•")
     assert "**In breve:**" not in field_value
     assert "🧃 In breve:" not in field_value
     assert "`fonte: www.ansa.it`" in field_value
@@ -180,7 +181,8 @@ def test_news_category_item_format_matches_single_item_field_format() -> None:
     for idx, field in enumerate(overview.fields):
         value = field.value or ""
         assert len(value) <= 1024
-        assert value.count("\n• ") >= 1
+        assert value.split("\n")[0].startswith("• **")
+        assert not value.split("\n")[1].startswith("•")
         assert value.count("`fonte: www.ansa.it`") >= 1
         item_count = value.count("`fonte:")
         assert item_count <= 1, f"Field {idx} exceeds max 1 item: {item_count}"
