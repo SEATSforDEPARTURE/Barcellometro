@@ -26,17 +26,55 @@ def test_resolve_news_sources_keeps_explicit_rss_url() -> None:
     assert resolved == [rss]
 
 
-def test_resolve_news_sources_maps_legacy_tokens_to_supported_sources() -> None:
+def test_resolve_news_sources_skips_unsupported_legacy_tokens(caplog) -> None:
+    caplog.set_level("WARNING")
     resolved = _resolve_news_sources(["ilpost", "fanpage.it"])
-    assert resolved == [
-        "https://www.agi.it/cronaca/rss",
-        "https://rss.adnkronos.com/RSS_Ultimora.xml",
-    ]
+    assert resolved == []
+    assert "news_source_legacy_unsupported_skipped source=ilpost" in caplog.text
+    assert "news_source_legacy_unsupported_skipped source=fanpage.it" in caplog.text
 
 
 def test_resolve_news_sources_maps_legacy_adnkronos_url_to_supported_source() -> None:
     resolved = _resolve_news_sources(["https://www.adnkronos.com/rss/2.0/Ultimora.xml"])
     assert resolved == ["https://rss.adnkronos.com/RSS_Ultimora.xml"]
+
+
+
+def test_fetch_news_content_skips_unsupported_legacy_sources_without_failing(monkeypatch, caplog) -> None:
+    rss_xml = """
+    <rss><channel>
+        <item>
+            <title>Arrestato dopo una rapina</title>
+            <link>https://example.com/story</link>
+            <description>Cronaca locale.</description>
+            <category>Cronaca</category>
+        </item>
+    </channel></rss>
+    """
+
+    caplog.set_level("WARNING")
+    requested_urls: list[str] = []
+
+    def _fake_http_get(url: str) -> str:
+        requested_urls.append(url)
+        return rss_xml
+
+    monkeypatch.setattr(fetchers, "_http_get", _fake_http_get)
+
+    payload = fetchers.fetch_news_content(["ansa", "ilpost", "wired", "fanpage"], ["cronaca"])
+
+    assert payload["sources"] == [
+        "https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml",
+        "https://www.wired.it/feed/rss",
+    ]
+    assert payload["used_sources"] == [
+        "https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml",
+        "https://www.wired.it/feed/rss",
+    ]
+    assert requested_urls == payload["sources"]
+    assert "news_source_legacy_unsupported_skipped source=ilpost" in caplog.text
+    assert "news_source_legacy_unsupported_skipped source=fanpage" in caplog.text
+
 
 def test_fetch_news_content_keeps_multiple_selected_categories_ordered(monkeypatch) -> None:
     rss_xml = """
