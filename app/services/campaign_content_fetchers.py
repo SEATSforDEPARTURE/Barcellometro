@@ -1059,7 +1059,7 @@ def fetch_horoscope_content(sources: list[str]) -> dict[str, Any]:
             }
             continue
         try:
-            payload = json.loads(_http_get(f"{base}/{slug_map[sign]}"))
+            payload = json.loads(_http_get(f"{base.rstrip('/')}/{slug_map[sign]}/"))
             horoscope = str(payload.get("horoscope") or "").strip()
             sections = _split_horoscope_sections(horoscope)
             merged = {
@@ -1115,7 +1115,7 @@ async def _fetch_horoscope_sign_async(
     slug: str,
     timeout: float,
 ) -> tuple[str, dict[str, Any] | None]:
-    response = await client.get(f"{base_url}/{slug}", timeout=timeout)
+    response = await client.get(f"{base_url.rstrip('/')}/{slug}/", timeout=timeout)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):

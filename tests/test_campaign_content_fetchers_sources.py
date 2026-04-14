@@ -7,6 +7,7 @@ from app.services.campaign_content_fetchers import (
     fetch_daily_news_extras,
     fetch_daily_quote,
     fetch_daily_song,
+    fetch_horoscope_content,
 )
 
 
@@ -208,3 +209,20 @@ def test_fetch_daily_extras_final_static_fallback(monkeypatch) -> None:
     assert extras["aforisma"]
     assert extras["canzone"]
     assert extras["meme"]
+
+
+def test_fetch_horoscope_content_uses_trailing_slash_urls(monkeypatch) -> None:
+    urls: list[str] = []
+
+    monkeypatch.setattr(fetchers, "_resolve_horoscope_sources", lambda _sources: ["https://ohmanda.com/api/horoscope"])
+
+    def _fake_http_get(url: str, *, timeout: float = 10.0) -> str:
+        _ = timeout
+        urls.append(url)
+        return '{"horoscope":"Oggi energia buona. Focus utile."}'
+
+    monkeypatch.setattr(fetchers, "_http_get", _fake_http_get)
+    payload = fetch_horoscope_content(["ohmanda"])
+    assert len(payload["signs"]) == 12
+    assert len(urls) == 12
+    assert all(url.endswith("/") for url in urls)

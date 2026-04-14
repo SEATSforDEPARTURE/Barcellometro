@@ -815,6 +815,47 @@ def test_horoscope_publish_continues_when_editorial_ai_fails() -> None:
     asyncio.run(_run())
 
 
+def test_horoscope_service_bypasses_editorial_ai_and_reaches_publish_store() -> None:
+    class _Channel(discord.abc.Messageable):
+        def __init__(self) -> None:
+            self.send = AsyncMock(return_value=SimpleNamespace(id=654))
+
+        async def _get_channel(self):
+            return self
+
+    class _Bot:
+        def __init__(self) -> None:
+            self.channel = _Channel()
+
+        def get_channel(self, _id):
+            return self.channel
+
+    class _Ai:
+        def __init__(self) -> None:
+            self.ask_for_task = AsyncMock(side_effect=TimeoutError("must not be awaited for horoscope"))
+
+        def is_enabled(self):
+            return True
+
+    async def _run() -> None:
+        payload = {"signs": {"Ariete": {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
+            payload["signs"][s] = {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+        db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
+        bot = _Bot()
+        ai = _Ai()
+        service = CampaignContentService(database=db, bot=bot, ai_service=ai)
+
+        with patch("app.services.campaign_content_service.fetch_horoscope_content_async", AsyncMock(return_value=payload)):
+            await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
+
+        ai.ask_for_task.assert_not_awaited()
+        bot.channel.send.assert_awaited_once()
+        db.upsert_campaign_content_message.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
 def test_invalid_editorial_json_does_not_fail_horoscope_publish() -> None:
     class _Ai:
         def is_enabled(self):
@@ -831,6 +872,46 @@ def test_invalid_editorial_json_does_not_fail_horoscope_publish() -> None:
         used_model = await service._rewrite_horoscope_payload(payload)
         assert used_model is None
         assert payload["signs"]["Ariete"]["love"] == "orig"
+
+    asyncio.run(_run())
+
+
+def test_weather_service_still_uses_editorial_ai_when_enabled() -> None:
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            return SimpleNamespace(id=777)
+
+    class _Bot:
+        def get_channel(self, _id):
+            return _Channel()
+
+    class _Ai:
+        def __init__(self) -> None:
+            self.ask_for_task = AsyncMock(return_value="meteo riscritto")
+
+        def is_enabled(self):
+            return True
+
+    async def _run() -> None:
+        db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
+        ai = _Ai()
+        service = CampaignContentService(database=db, bot=_Bot(), ai_service=ai)
+        weather_payload = {
+            "regions": {
+                "Nord": {
+                    "summary": "Tempo variabile",
+                    "source_points": ["Milano: sole"],
+                }
+            },
+            "used_sources": ["meteo.it"],
+            "fallback_used": False,
+        }
+        with patch("app.services.campaign_content_service.fetch_weather_content", return_value=weather_payload):
+            await service.execute_weather_service({"guild_id": "1", "channel_id": "2", "id": 9, "interval_minutes": 60, "sources_json": "[]"})
+        ai.ask_for_task.assert_awaited()
 
     asyncio.run(_run())
 
