@@ -14,6 +14,7 @@ from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.shared.discord.embed_limits import (
     DISCORD_MAX_EMBED_TOTAL_CHARS,
+    compute_embed_text_size,
     split_markdown_lines_into_field_values,
 )
 from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
@@ -144,20 +145,20 @@ def _split_field_value_to_fit_budget(value: str, *, budget: int) -> list[str]:
 def enforce_embed_size_limit(embeds: list[discord.Embed]) -> list[discord.Embed]:
     bounded: list[discord.Embed] = []
     for embed_index, embed in enumerate(embeds):
-        if len(embed) <= DISCORD_MAX_EMBED_TOTAL_CHARS:
+        if compute_embed_text_size(embed) <= DISCORD_MAX_EMBED_TOTAL_CHARS:
             bounded.append(embed)
             continue
 
         logger.debug(
             "campaign content: enforce_embed_size_limit split start embed_index=%s size=%s fields=%s",
             embed_index,
-            len(embed),
+            compute_embed_text_size(embed),
             len(embed.fields),
         )
         current = _clone_embed_without_fields(embed, include_description=True)
-        if len(current) > DISCORD_MAX_EMBED_TOTAL_CHARS and current.description:
+        if compute_embed_text_size(current) > DISCORD_MAX_EMBED_TOTAL_CHARS and current.description:
             without_description = _clone_embed_without_fields(embed, include_description=False)
-            current.description = (current.description or "")[: max(1, DISCORD_MAX_EMBED_TOTAL_CHARS - len(without_description))]
+            current.description = (current.description or "")[: max(1, DISCORD_MAX_EMBED_TOTAL_CHARS - compute_embed_text_size(without_description))]
         has_content = bool(current.description)
 
         for raw_field in embed.fields:
@@ -168,13 +169,13 @@ def enforce_embed_size_limit(embeds: list[discord.Embed]) -> list[discord.Embed]
                 pending_chunks = [raw_chunk or "—"]
                 while pending_chunks:
                     field_value = pending_chunks.pop(0)
-                    projected_size = len(current) + len(field_name) + len(field_value)
+                    projected_size = compute_embed_text_size(current) + len(field_name) + len(field_value)
                     if len(current.fields) >= 25 or projected_size > DISCORD_MAX_EMBED_TOTAL_CHARS:
                         if has_content:
                             bounded.append(current)
                         current = _clone_embed_without_fields(embed, include_description=False)
                         has_content = False
-                        available_budget = max(1, DISCORD_MAX_EMBED_TOTAL_CHARS - len(current) - len(field_name))
+                        available_budget = max(1, DISCORD_MAX_EMBED_TOTAL_CHARS - compute_embed_text_size(current) - len(field_name))
                         split_chunks = _split_field_value_to_fit_budget(field_value, budget=available_budget)
                         pending_chunks = split_chunks + pending_chunks
                         continue
