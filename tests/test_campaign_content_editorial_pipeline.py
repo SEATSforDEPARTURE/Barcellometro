@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 import json
+import re
 import sys
 import types
 from types import SimpleNamespace
@@ -767,7 +768,7 @@ def test_execute_news_service_reads_csv_categories_fallback_column() -> None:
     asyncio.run(_run())
 
 
-def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
+def test_horoscope_rewrite_is_single_sign_call_and_text_fallback() -> None:
     class _Ai:
         def __init__(self, output: str):
             self.ask_for_task = AsyncMock(return_value=output)
@@ -789,7 +790,7 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         ai = _Ai(json.dumps({k: {"horoscope": "testo **chiave** in italiano 😵‍💫"} for k in payload["signs"]}))
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(payload)
-        ai.ask_for_task.assert_awaited_once()
+        assert ai.ask_for_task.await_count == len(SIGN_ORDER)
         assert ai.ask_for_task.await_args.args[0] == "campaign_editorial"
 
     async def _run_invalid() -> None:
@@ -895,10 +896,10 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         payload["signs"][s] = {"sign": s, "horoscope": "you are reminded today."}
 
     async def _run_valid() -> None:
-        ai = _Ai(json.dumps({k: {"horoscope": "testo italiano **forte** 😵‍💫"} for k in payload["signs"]}))
+        ai = _Ai("testo italiano **forte** e leggermente trash 😵‍💫")
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(payload)
-        ai.ask_for_task.assert_awaited_once()
+        assert ai.ask_for_task.await_count == len(SIGN_ORDER)
         assert ai.ask_for_task.await_args.args[0] == "campaign_editorial"
 
     async def _run_invalid() -> None:
@@ -1014,26 +1015,18 @@ def test_horoscope_service_uses_editorial_ai_and_reaches_publish_store() -> None
 
     class _Ai:
         def __init__(self) -> None:
-            rewritten = {
-                sign: {
-                    "love": "Cuore in italiano",
-                    "work": "Scrivania in italiano",
-                    "money": "Portafoglio in italiano",
-                    "energy": "Batteria in italiano",
-                    "friction": "Attrito in italiano",
-                    "advice": "Consiglio in italiano",
-                }
-                for sign in SIGN_ORDER
-            }
-            self.ask_for_task = AsyncMock(return_value=json.dumps(rewritten, ensure_ascii=False))
+            self.ask_for_task = AsyncMock(return_value="Scegli **chiarezza pratica** e niente drammi inutili. Chiudi una priorità con stile 😏")
 
         def is_enabled(self):
             return True
 
+        def get_model_config(self, _task):
+            return "gpt-test"
+
     async def _run() -> None:
-        payload = {"signs": {"Ariete": {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        payload = {"signs": {"Ariete": {"horoscope": "Aries: your day speeds up if you pick one real task first."}}}
         for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
-            payload["signs"][s] = {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+            payload["signs"][s] = {"horoscope": f"{s}: your focus improves when you keep things simple."}
         db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
         bot = _Bot()
         ai = _Ai()
@@ -1042,7 +1035,7 @@ def test_horoscope_service_uses_editorial_ai_and_reaches_publish_store() -> None
         with patch("app.services.campaign_content_service.fetch_horoscope_content_async", AsyncMock(return_value=payload)):
             await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
 
-        ai.ask_for_task.assert_awaited_once()
+        assert ai.ask_for_task.await_count == len(SIGN_ORDER)
         bot.channel.send.assert_awaited_once()
         db.upsert_campaign_content_message.assert_awaited_once()
 
@@ -1056,6 +1049,9 @@ def test_invalid_editorial_json_does_not_fail_horoscope_publish() -> None:
 
         async def ask_for_task(self, *args, **kwargs):
             return "not-json"
+
+        def get_model_config(self, _task):
+            return "gpt-test"
 
     async def _run() -> None:
         payload = {"signs": {"Ariete": {"horoscope": "You are reminded to stay calm today."}}}
@@ -1174,6 +1170,9 @@ def test_horoscope_rewrite_rejects_collapsed_ai_output_and_preserves_real_differ
             }
             return json.dumps(collapsed, ensure_ascii=False)
 
+        def get_model_config(self, _task):
+            return "gpt-test"
+
     async def _run() -> None:
         payload = {
             "signs": {
@@ -1191,7 +1190,7 @@ def test_horoscope_rewrite_rejects_collapsed_ai_output_and_preserves_real_differ
         }
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         used_model = await service._rewrite_horoscope_payload(payload)
-        assert used_model is None
+        assert used_model == "gpt-test"
         assert payload["signs"]["Ariete"]["horoscope"] != payload["signs"]["Toro"]["horoscope"]
         assert "Ariete" not in payload["signs"]["Ariete"]["horoscope"]
         assert "Toro" not in payload["signs"]["Toro"]["horoscope"]
@@ -1376,6 +1375,64 @@ def test_horoscope_rewrite_partial_provider_failures_use_differentiated_fallback
         assert "toro" not in payload["signs"]["Toro"]["horoscope"].lower()
         assert "gemelli" not in payload["signs"]["Gemelli"]["horoscope"].lower()
         assert all(token not in payload["signs"]["Toro"]["horoscope"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
+
+    asyncio.run(_run())
+
+
+def test_horoscope_rewrite_uses_single_ai_call_per_sign_and_keeps_short_output() -> None:
+    class _Ai:
+        def __init__(self) -> None:
+            self.ask_for_task = AsyncMock(
+                return_value=(
+                    "Prima frase molto lunga con dettagli extra e parole ripetute per vedere il taglio. "
+                    "Seconda frase ancora utile ma breve. Terza frase che deve sparire subito 😵‍💫"
+                )
+            )
+
+        def is_enabled(self):
+            return True
+
+        def get_model_config(self, _task):
+            return "gpt-test"
+
+    async def _run() -> None:
+        payload = {"signs": {sign: {"horoscope": f"{sign}: your focus improves when you keep things simple."} for sign in SIGN_ORDER}}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
+        await service._rewrite_horoscope_payload(payload)
+        assert service._ai.ask_for_task.await_count == len(SIGN_ORDER)
+        for sign in SIGN_ORDER:
+            text = payload["signs"][sign]["horoscope"].strip()
+            assert len(text) <= 300
+            assert len(re.findall(r"[.!?]", text)) <= 2
+            assert re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]$", text)
+            assert all(token not in text.lower() for token in ("in amore", "sul lavoro", "nei soldi", "energia:"))
+
+    asyncio.run(_run())
+
+
+def test_horoscope_fallback_is_brief_when_ai_fails() -> None:
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *args, **kwargs):
+            raise TimeoutError
+
+    async def _run() -> None:
+        long_source = (
+            "You are reminded to stay calm today and avoid impulsive moves in chat. "
+            "Focus on one practical goal before noon and postpone extra spending. "
+            "Keep listening, avoid noise, and be careful with every commitment."
+        )
+        payload = {"signs": {sign: {"horoscope": long_source} for sign in SIGN_ORDER}}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
+        await service._rewrite_horoscope_payload(payload)
+        for sign in SIGN_ORDER:
+            text = payload["signs"][sign]["horoscope"].strip()
+            assert len(text) <= 300
+            assert len(re.findall(r"[.!?]", text)) <= 2
+            assert "you are reminded" not in text.lower()
+            assert re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]$", text)
 
     asyncio.run(_run())
 

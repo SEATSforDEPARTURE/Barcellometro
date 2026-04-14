@@ -320,6 +320,9 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
     assert "♈ Ariete" in field_map["🤗 __**SEGNI IN FORMA**__"] or "♈ Ariete" in field_map["🤬 __**SEGNI IRREQUIETI**__"]
     assert signs_field_map["♈ __**ARIETE**__"].startswith("- ")
     assert signs_field_map["♈ __**ARIETE**__"].count("\n") == 0
+    assert re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]$", signs_field_map["♈ __**ARIETE**__"])
+    assert len(re.findall(r"[.!?]", signs_field_map["♈ __**ARIETE**__"])) <= 2
+    assert len(signs_field_map["♈ __**ARIETE**__"]) <= 300
     assert "In amore" not in signs_field_map["♈ __**ARIETE**__"]
     assert "Sul lavoro" not in signs_field_map["♈ __**ARIETE**__"]
     assert "Nei soldi" not in signs_field_map["♈ __**ARIETE**__"]

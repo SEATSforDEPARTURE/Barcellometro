@@ -1685,11 +1685,21 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         cleaned = sanitize_plain_text(sanitize_horoscope_text("", value))
         cleaned = re.sub(r"^[\s\-\u2022]+", "", cleaned).strip()
         if not cleaned:
-            cleaned = "giornata da gestire con **calma lucida**, scegliendo una priorità per volta 😵‍💫✨."
+            cleaned = "giornata da gestire con **calma lucida**, scegliendo una priorità per volta."
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
         cleaned = re.sub(r"^[^\wÀ-ÿ]+", "", cleaned).strip()
+        parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+        if parts:
+            cleaned = " ".join(parts[:2]).strip()
+        cleaned = re.sub(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]", "", cleaned).strip()
+        if not re.search(r"\*\*[^*]+\*\*", cleaned):
+            words = cleaned.split()
+            if words:
+                span = 2 if len(words) >= 6 else 1
+                cleaned = f"**{' '.join(words[:span])}** {' '.join(words[span:])}".strip()
         if not cleaned.endswith((".", "!", "?")):
             cleaned = f"{cleaned}."
-        return f"- {cleaned}"
+        return f"- {cleaned} 🙂"
 
     sign_fields: list[tuple[str, str]] = []
     for sign in SIGN_ORDER:
