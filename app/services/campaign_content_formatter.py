@@ -1283,8 +1283,19 @@ def _next_weather_run_field(config: dict[str, Any], *, generated_at: datetime) -
     if next_run is None:
         return None
     return (
-        "• Il criceto chiude il taccuino meteo per ora.\n"
-        f"• Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
+        "Il criceto chiude il taccuino meteo per ora.\n"
+        f"Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
+    )
+
+
+def _next_horoscope_run_field(config: dict[str, Any], *, generated_at: datetime) -> str | None:
+    _ = generated_at
+    next_run = _next_campaign_run_time(config)
+    if next_run is None:
+        return None
+    return (
+        "Il criceto chiude il taccuino per ora.\n"
+        f"Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
     )
 
 
@@ -1735,7 +1746,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
             f"• ⚡: {energy_line}"
         )
         sign_fields.append((format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")), summary[:1024]))
-    next_run_field = _next_news_run_field(config, generated_at=now_utc)
+    next_run_field = _next_horoscope_run_field(config, generated_at=now_utc)
     if next_run_field:
         overview.add_field(
             name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),

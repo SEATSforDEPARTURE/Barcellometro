@@ -327,8 +327,12 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
     assert "**" in signs_field_map["♈ __**ARIETE**__"]
     assert signs_field_map["♈ __**ARIETE**__"].count("❤️") == 1
     assert "🔜 __**PROSSIMA EDIZIONE**__" in field_map
-    assert field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("Il criceto chiude il taccuino per ora.")
-    assert "Ci rivediamo alle **19:30** con la prossima edizione." in field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+    next_edition_value = field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+    assert next_edition_value.startswith("Il criceto chiude il taccuino per ora.")
+    assert "Ci rivediamo alle **19:30** con la prossima edizione." in next_edition_value
+    assert "\n" in next_edition_value
+    assert all(not line.startswith("- ") for line in next_edition_value.splitlines())
+    assert all(not line.startswith("• ") for line in next_edition_value.splitlines())
 
 
 def test_horoscope_page_map_tracks_sign_pages() -> None:
@@ -414,8 +418,12 @@ def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
     assert detail_names[-2] == "🌡️ __**RANGE TERMICO**__"
     assert detail_names[-1] == "🔜 __**PROSSIMA EDIZIONE**__"
     assert details_field_map["🌡️ __**RANGE TERMICO**__"].startswith("• **")
-    assert details_field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("• Il criceto chiude il taccuino meteo per ora.")
-    assert "• Ci rivediamo alle **19:30** con la prossima edizione." in details_field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+    next_edition_value = details_field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+    assert next_edition_value.startswith("Il criceto chiude il taccuino meteo per ora.")
+    assert "Ci rivediamo alle **19:30** con la prossima edizione." in next_edition_value
+    assert "\n" in next_edition_value
+    assert all(not line.startswith("- ") for line in next_edition_value.splitlines())
+    assert all(not line.startswith("• ") for line in next_edition_value.splitlines())
 
 
 def test_weather_page_map_tracks_area_pages() -> None:
