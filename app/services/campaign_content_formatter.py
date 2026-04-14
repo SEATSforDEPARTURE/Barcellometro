@@ -1459,15 +1459,53 @@ def build_weather_page_map() -> list[dict[str, Any]]:
 def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
     signs = payload.get("signs", {})
+
+    def _score_sign(sign: str, sign_payload: dict[str, Any]) -> float:
+        confidence_raw = sign_payload.get("confidence")
+        try:
+            confidence = float(confidence_raw) if confidence_raw is not None else 0.0
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(confidence, 1.0))
+        base = confidence * 1.6
+
+        positive_markers = (
+            "alta", "buona", "bene", "ok", "ottim", "focus", "slancio", "stabile", "seren", "favore", "opportun"
+        )
+        negative_markers = (
+            "bassa", "calo", "tensione", "attrit", "rallenta", "prudenza", "incerto", "fatica", "evita", "caos"
+        )
+        section_weights = {
+            "love": 0.45,
+            "work": 0.55,
+            "money": 0.45,
+            "energy": 0.60,
+            "advice": 0.25,
+            "friction": -0.65,
+        }
+        lexical = 0.0
+        for section, weight in section_weights.items():
+            text = sanitize_horoscope_text(sign, str(sign_payload.get(section) or "")).lower()
+            if not text:
+                continue
+            pos_hits = sum(1 for marker in positive_markers if marker in text)
+            neg_hits = sum(1 for marker in negative_markers if marker in text)
+            lexical += weight * (pos_hits - neg_hits * 1.1)
+        if sign_payload.get("fallback_used"):
+            lexical -= 0.35
+        deterministic_jitter = (sum(ord(ch) for ch in sign) % 17) / 100.0
+        return round(base + lexical + deterministic_jitter, 4)
+
     scored: list[tuple[str, float]] = []
     for sign in SIGN_ORDER:
         sp = signs.get(sign, {})
-        conf = float(sp.get("confidence") or 0.0)
-        fallback_penalty = 0.5 if sp.get("fallback_used") else 0.0
-        score = conf + (0.2 if "alta" in str(sp.get("energy", "")).lower() else 0) - fallback_penalty
-        scored.append((sign, score))
-    top = [name for name, _ in sorted(scored, key=lambda x: x[1], reverse=True)[:3]]
-    delicate = [name for name, _ in sorted(scored, key=lambda x: x[1])[:3]]
+        sign_payload = sp if isinstance(sp, dict) else {}
+        scored.append((sign, _score_sign(sign, sign_payload)))
+    ranked = sorted(scored, key=lambda item: item[1], reverse=True)
+    top = [name for name, _ in ranked[:3]]
+    delicate = [name for name, _ in sorted(scored, key=lambda item: item[1]) if name not in top][:3]
+    if len(delicate) < 3:
+        delicate = [name for name, _ in sorted(scored, key=lambda item: item[1])[:3]]
 
     mood_parts = [str(signs.get(sign, {}).get("tone") or "").strip() for sign in SIGN_ORDER if signs.get(sign)]
     mood = ", ".join(part for part in mood_parts[:4] if part) or "variegato"
@@ -1479,22 +1517,22 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     if not selected_signs:
         selected_signs = {slugify_label(sign) for sign in SIGN_ORDER}
 
-    base_title = f"🔮 {format_standard_title(f'OROSCOPO CRICETOSO • {edition_label}')}"
-    overview = discord.Embed(title=base_title, color=color)
+    overview_title = f"🔮 {format_standard_title('OROSCOPO CRICETOSO • PANORAMICA')}"
+    overview = discord.Embed(title=overview_title, color=color)
     overview.description = format_standard_description((
         f"**{greeting}** 🐹: qui **Barcellometro in regia**, con il quadro zodiacale della giornata. "
         f"**Segni in forma**, **vibrazioni da tenere d'occhio** e **stelle dritte al punto**."
     ), blank_line_before_fields=True)
     top_list = ", ".join(f"**{sign}**" for sign in top) or "**n/d**"
     delicate_list = ", ".join(f"**{sign}**" for sign in delicate) or "**n/d**"
-    sign_of_day = top[0] if top else "n/d"
+    sign_of_day = ranked[0][0] if ranked else "n/d"
     overview.add_field(
         name=format_standard_field_name("SEGNI IN FORMA", emoji="✨"),
         value=f"• {top_list}",
         inline=False,
     )
     overview.add_field(
-        name=format_standard_field_name("SEGNI DA TRATTARE CON PIÙ TATTO", emoji="🫶"),
+        name=format_standard_field_name("SEGNI IRREQUIETI", emoji="🫶"),
         value=f"• {delicate_list}",
         inline=False,
     )
@@ -1508,51 +1546,79 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         inline=False,
     )
 
-    def _single_sentence(value: str, *, fallback: str, emoji: str) -> str:
+    def _single_sentence(value: str, *, fallback: str) -> str:
         cleaned = sanitize_plain_text(value)
         if not cleaned:
             cleaned = fallback
         parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
         sentence = parts[0] if parts else fallback
         sentence = trim_sentence_block(sentence, limit=150)
-        if sentence.endswith(("❤️", "💼", "💰", "⚡")):
-            return sentence
         if not sentence.endswith((".", "!", "?")):
             sentence = f"{sentence}."
-        return f"{sentence} {emoji}"
+        return sentence
+
+    def _with_bold_focus(sentence: str, *, fallback_focus: str) -> str:
+        text = sanitize_plain_text(sentence)
+        if not text:
+            return f"**{fallback_focus}**."
+        parts = text.split()
+        if any("**" in part for part in parts):
+            return text
+        focus_len = 2 if len(parts) >= 6 else 1
+        head = " ".join(parts[:focus_len]).strip()
+        tail = " ".join(parts[focus_len:]).strip()
+        if not head:
+            return f"**{fallback_focus}**."
+        return f"**{head}** {tail}".strip()
 
     sign_fields: list[tuple[str, str]] = []
     for sign in SIGN_ORDER:
         if slugify_label(sign) not in selected_signs:
             continue
         data = signs.get(sign, {})
+        love_line = _with_bold_focus(
+            _single_sentence(sanitize_horoscope_text(sign, str(data.get("love") or "")), fallback="In amore ascolta di più e fai un passo gentile"),
+            fallback_focus="ascolta di più",
+        )
+        work_line = _with_bold_focus(
+            _single_sentence(sanitize_horoscope_text(sign, str(data.get("work") or "")), fallback="Sul lavoro punta alle priorità e chiudi una cosa per volta"),
+            fallback_focus="punta alle priorità",
+        )
+        money_line = _with_bold_focus(
+            _single_sentence(sanitize_horoscope_text(sign, str(data.get("money") or "")), fallback="Nei soldi evita gli slanci e tieni d'occhio il budget"),
+            fallback_focus="evita gli slanci",
+        )
+        energy_line = _with_bold_focus(
+            _single_sentence(sanitize_horoscope_text(sign, str(data.get("energy") or "")), fallback="Energia buona: dosala senza strafare"),
+            fallback_focus="buona",
+        )
         summary = (
-            f"• **Amore ❤️:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('love') or '')), fallback='Meglio parlare chiaro e senza giri strani', emoji='❤️')}\n"
-            f"• **Lavoro 💼:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('work') or '')), fallback='Serve una priorità netta per non disperdere energie', emoji='💼')}\n"
-            f"• **Soldi 💰:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('money') or '')), fallback='Tieni il budget sotto controllo prima delle spese impulsive', emoji='💰')}\n"
-            f"• **Energia ⚡:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('energy') or '')), fallback='Buona carica, ma va incanalata con più equilibrio', emoji='⚡')}"
+            f"• ❤️: {love_line}\n"
+            f"• 💼: {work_line}\n"
+            f"• 💰: {money_line}\n"
+            f"• ⚡: {energy_line}"
         )
         sign_fields.append((format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")), summary[:1024]))
-    next_run = _next_campaign_run_time(config)
-    if next_run is not None:
+    next_run_field = _next_news_run_field(config, generated_at=now_utc)
+    if next_run_field:
         overview.add_field(
             name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
-            value=(
-                "• Il criceto chiude il taccuino stellare per ora.\n"
-                f"• Ci rivediamo alle **{next_run.strftime('%H:%M')}** con la prossima edizione."
-            ),
+            value=next_run_field,
             inline=False,
         )
     embeds: list[discord.Embed] = [overview]
     if sign_fields:
-        current = discord.Embed(title=base_title, color=color)
+        signs_title = f"🔮 {format_standard_title('OROSCOPO CRICETOSO • I SEGNI')}"
+        current = discord.Embed(title=signs_title, color=color)
+        current.description = format_standard_description("*Leggiamo l’oroscopo segno per segno...*", blank_line_before_fields=True)
         for field_name, field_value in sign_fields:
             candidate = discord.Embed.from_dict(current.to_dict())
             candidate.add_field(name=field_name, value=field_value, inline=False)
             if len(candidate.fields) > 25 or len(candidate) > 6000:
                 if current.fields:
                     embeds.append(current)
-                current = discord.Embed(title=base_title, color=color)
+                current = discord.Embed(title=signs_title, color=color)
+                current.description = format_standard_description("*Leggiamo l’oroscopo segno per segno...*", blank_line_before_fields=True)
                 current.add_field(name=field_name, value=field_value, inline=False)
                 continue
             current = candidate
