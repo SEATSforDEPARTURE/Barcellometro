@@ -14,4 +14,11 @@ class TranslationResult:
 
 
 class TranslateService(Protocol):
-    async def translate(self, text: str, target_lang: str) -> TranslationResult: ...
+    async def translate(
+        self,
+        text: str,
+        target_lang: str,
+        *,
+        source_lang: str | None = None,
+        backend: str | None = None,
+    ) -> TranslationResult: ...

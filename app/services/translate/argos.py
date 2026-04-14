@@ -8,8 +8,16 @@ from app.services.translate.base import TranslationResult
 
 
 class ArgosTranslateService:
-    async def translate(self, text: str, target_lang: str) -> TranslationResult:
+    async def translate(
+        self,
+        text: str,
+        target_lang: str,
+        *,
+        source_lang: str | None = None,
+        backend: str | None = None,
+    ) -> TranslationResult:
         def _run() -> TranslationResult:
+            _ = backend
             installed_languages = argostranslate.translate.get_installed_languages()
             target = None
             for language in installed_languages:
