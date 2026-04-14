@@ -31,6 +31,7 @@ from app.services.campaign_content_formatter import (
     build_news_page_map,
     build_weather_embeds,
     build_weather_page_map,
+    enforce_embed_size_limit,
     _iter_configured_editorial_categories,
     _news_identity,
     _valid_news_items,
@@ -253,6 +254,12 @@ class CampaignContentService:
             used_model=used_model,
         )
         apply_shared_footer_and_pagination(embeds, footer_text)
+        embeds = enforce_embed_size_limit(embeds)
+        logger.debug(
+            "campaign content: %s embed sizes after enforcement=%s",
+            service_type.lower(),
+            [len(embed) for embed in embeds],
+        )
         channel = self._bot.get_channel(int(channel_id))
         if channel is None:
             try:
