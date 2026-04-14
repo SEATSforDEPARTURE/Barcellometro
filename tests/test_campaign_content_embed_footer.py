@@ -308,11 +308,12 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
     assert horoscope_pages[0].title == "🔮 __**OROSCOPO CRICETOSO • PANORAMICA**__"
     assert horoscope_pages[1].title == "🔮 __**OROSCOPO CRICETOSO • I SEGNI**__"
     assert (horoscope_pages[1].description or "").startswith("*Leggiamo l’oroscopo segno per segno...*")
-    assert "✨ __**SEGNI IN FORMA**__" in field_map
-    assert "🫶 __**SEGNI IRREQUIETI**__" in field_map
+    assert "🤗 __**SEGNI IN FORMA**__" in field_map
+    assert "🤬 __**SEGNI IRREQUIETI**__" in field_map
     assert "🌟 __**SEGNO DEL GIORNO**__" in field_map
-    assert field_map["✨ __**SEGNI IN FORMA**__"].startswith("• **")
-    assert field_map["🫶 __**SEGNI IRREQUIETI**__"].startswith("• **")
+    assert field_map["🤗 __**SEGNI IN FORMA**__"].startswith("• **")
+    assert field_map["🤬 __**SEGNI IRREQUIETI**__"].startswith("• **")
+    assert "♈ Ariete" in field_map["🤗 __**SEGNI IN FORMA**__"] or "♈ Ariete" in field_map["🤬 __**SEGNI IRREQUIETI**__"]
     assert field_map["🌟 __**SEGNO DEL GIORNO**__"].splitlines()[0].startswith("• **")
     assert signs_field_map["♈ __**ARIETE**__"].startswith("• ❤️: ")
     assert signs_field_map["♈ __**ARIETE**__"].count("\n") == 3
@@ -349,8 +350,8 @@ def test_horoscope_overview_scores_avoid_trivial_overlap_and_order_bias() -> Non
     }
     pages = build_horoscope_embeds({}, payload)
     overview_fields = {field.name: field.value or "" for field in pages[0].fields}
-    top_signs = set(re.findall(r"\*\*([^*]+)\*\*", overview_fields["✨ __**SEGNI IN FORMA**__"]))
-    delicate_signs = set(re.findall(r"\*\*([^*]+)\*\*", overview_fields["🫶 __**SEGNI IRREQUIETI**__"]))
+    top_signs = set(re.findall(r"\*\*([^*]+)\*\*", overview_fields["🤗 __**SEGNI IN FORMA**__"]))
+    delicate_signs = set(re.findall(r"\*\*([^*]+)\*\*", overview_fields["🤬 __**SEGNI IRREQUIETI**__"]))
     sign_of_day = re.findall(r"\*\*([^*]+)\*\*", overview_fields["🌟 __**SEGNO DEL GIORNO**__"])[0]
 
     assert top_signs

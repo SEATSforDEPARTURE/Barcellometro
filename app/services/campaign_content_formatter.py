@@ -1531,16 +1531,20 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         f"**{greeting}** 🐹: qui **Barcellometro in regia**, con il quadro zodiacale della giornata. "
         f"**Segni in forma**, **vibrazioni da tenere d'occhio** e **stelle dritte al punto**."
     ), blank_line_before_fields=True)
-    top_list = ", ".join(f"**{sign}**" for sign in top) or "**n/d**"
-    delicate_list = ", ".join(f"**{sign}**" for sign in delicate) or "**n/d**"
+    def _sign_with_symbol(sign: str) -> str:
+        symbol = SIGN_EMOJIS.get(sign, "✨")
+        return f"{symbol} {sign}"
+
+    top_list = ", ".join(f"**{_sign_with_symbol(sign)}**" for sign in top) or "**n/d**"
+    delicate_list = ", ".join(f"**{_sign_with_symbol(sign)}**" for sign in delicate) or "**n/d**"
     sign_of_day = ranked[0][0] if ranked else "n/d"
     overview.add_field(
-        name=format_standard_field_name("SEGNI IN FORMA", emoji="✨"),
+        name=format_standard_field_name("SEGNI IN FORMA", emoji="🤗"),
         value=f"• {top_list}",
         inline=False,
     )
     overview.add_field(
-        name=format_standard_field_name("SEGNI IRREQUIETI", emoji="🫶"),
+        name=format_standard_field_name("SEGNI IRREQUIETI", emoji="🤬"),
         value=f"• {delicate_list}",
         inline=False,
     )
