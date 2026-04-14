@@ -43,6 +43,7 @@ from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
+from app.shared.discord.author_pipeline import finalize_embeds_author
 from app.shared.discord.embed_limits import (
     compute_embed_text_size,
     compute_embeds_message_text_size,
@@ -265,7 +266,7 @@ class CampaignContentService:
         message_batches = split_embeds_for_discord_messages(embeds)
         embeds = [embed for batch in message_batches for embed in batch]
         logger.info("embeds after split=%s", len(embeds))
-        self._reapply_author_and_footer(embeds, footer_text=footer_text, service_name=footer_service_name)
+        embeds = await self._reapply_author_after_split(embeds, service_name=footer_service_name)
         message_batches = split_embeds_for_discord_messages(embeds)
         embeds = [embed for batch in message_batches for embed in batch]
         if not embeds:
@@ -784,12 +785,13 @@ class CampaignContentService:
         parsed: dict[str, Any] = {}
         ai_applied = False
         try:
-            parsed = json.loads(output or "{}")
+            parsed = json.loads(output or "")
             if not isinstance(parsed, dict):
-                parsed = {}
+                logger.warning("campaign content: horoscope editorial returned non-object json, preserving original payload")
+                return None
         except json.JSONDecodeError:
-            logger.warning("campaign content: horoscope editorial returned invalid json, using field-level fallbacks")
-            parsed = {}
+            logger.warning("campaign content: horoscope editorial returned invalid json, preserving original payload")
+            return None
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             rewritten_sign = parsed.get(sign, {}) if isinstance(parsed.get(sign), dict) else {}
@@ -804,20 +806,14 @@ class CampaignContentService:
         self._enforce_horoscope_diversity(payload)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
 
-    def _reapply_author_and_footer(self, embeds: list[discord.Embed], *, footer_text: str, service_name: str) -> None:
-        total = len(embeds)
-        base_author = str(getattr(embeds[0].author, "name", "") or "").strip() if embeds else ""
-        if not base_author:
-            base_author = f"servizio {service_name.upper()}"
-        base_author = re.sub(r"\s*[•·]\s*Pagina\s+\d+/\d+\s*$", "", base_author, flags=re.IGNORECASE).strip()
-        for page_index, embed in enumerate(embeds, start=1):
-            author_name = base_author
-            if total > 1:
-                author_name = f"{base_author} • Pagina {page_index}/{total}"
-            icon_url = getattr(embed.author, "icon_url", None)
-            url = getattr(embed.author, "url", None)
-            embed.set_author(name=author_name, icon_url=icon_url, url=url)
-            embed.set_footer(text=footer_text)
+    async def _reapply_author_after_split(self, embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
+        for embed in embeds:
+            embed.remove_author()
+        return await finalize_embeds_author(
+            embeds,
+            None,
+            default_service_name=service_name,
+        )
 
     def _apply_horoscope_italian_fallback(self, payload: dict[str, Any]) -> None:
         signs = payload.get("signs")
