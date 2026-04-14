@@ -24,6 +24,7 @@ from app.services.campaign_content_fetchers import (
 from app.services.campaign_content_formatter import (
     HOROSCOPE_SECTIONS,
     SIGN_ORDER,
+    format_source_label,
     apply_shared_footer_and_pagination,
     build_fallback_embed,
     build_horoscope_embeds,
@@ -255,7 +256,7 @@ class CampaignContentService:
         now = datetime.now(timezone.utc)
         guild_id = str(config["guild_id"])
         channel_id = str(config["channel_id"])
-        footer_sources = used_sources or configured_sources
+        footer_sources = self._format_campaign_sources(used_sources or configured_sources, service_type=service_type)
         footer_service_name = self._campaign_footer_service_name(service_type)
         contributors = [*footer_sources, *([used_model] if used_model else [])]
         attach_footer_meta_to_all(
@@ -1421,13 +1422,35 @@ class CampaignContentService:
         }
         return mapped.get(str(service_type or "").upper(), "campagne_notizie")
 
-    def _campaign_footer_contributors(self, metadata: dict[str, Any] | None) -> list[str]:
+    @staticmethod
+    def _campaign_source_type(service_type: str) -> str:
+        return "rss" if str(service_type or "").upper() == "NEWS" else "api"
+
+    @classmethod
+    def _format_campaign_sources(cls, sources: list[str], *, service_type: str) -> list[str]:
+        source_type = cls._campaign_source_type(service_type)
+        labels: list[str] = []
+        seen: set[str] = set()
+        for source in sources:
+            raw = str(source or "").strip()
+            if re.search(r"\s(?:RSS|API)$", raw):
+                label = raw
+            else:
+                label = format_source_label(raw, source_type)
+            if not label or label in seen:
+                continue
+            seen.add(label)
+            labels.append(label)
+        return labels
+
+    def _campaign_footer_contributors(self, metadata: dict[str, Any] | None, *, service_type: str) -> list[str]:
         if not isinstance(metadata, dict):
             return []
+        sources_raw = [str(source or "").strip() for source in (metadata.get("used_sources") or metadata.get("configured_sources") or [])]
+        source_contributors = self._format_campaign_sources(sources_raw, service_type=service_type)
         contributors: list[str] = []
         seen: set[str] = set()
-        for source in metadata.get("used_sources") or metadata.get("configured_sources") or []:
-            token = str(source or "").strip()
+        for token in source_contributors:
             if token and token not in seen:
                 contributors.append(token)
                 seen.add(token)
@@ -1444,7 +1467,7 @@ class CampaignContentService:
         metadata: dict[str, Any] | None,
     ) -> discord.Embed:
         embed = discord.Embed.from_dict(embed_payload if isinstance(embed_payload, dict) else {})
-        contributors = self._campaign_footer_contributors(metadata)
+        contributors = self._campaign_footer_contributors(metadata, service_type=service_type)
         await hydrate_persisted_embed_with_footer(
             embed,
             footer_context={
