@@ -335,7 +335,7 @@ def test_news_description_uses_natural_greetings_by_daypart() -> None:
         assert "📰" in description
         assert "Che ci racconta il mondo oggi?" not in description
         assert len(news) == 2
-        assert news[1].description == "Che ci racconta il mondo oggi?"
+        assert news[1].description == "*Che ci racconta il mondo oggi?*"
         assert "Buona pomeriggio" not in description
 
 
