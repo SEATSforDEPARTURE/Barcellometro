@@ -1306,6 +1306,24 @@ def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, 
     return None
 
 
+def _news_item_source(item: dict[str, Any]) -> str:
+    return str(item.get("source") or "").strip()
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        token = str(value or "").strip()
+        if not token:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        ordered.append(token)
+    return ordered
+
+
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
     now_utc = _overview_now(payload)
@@ -1325,6 +1343,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
     editorial_categories: list[tuple[str, str, str, dict[str, Any]]] = []
     latest_item: dict[str, Any] | None = None
     used_emojis: set[str] = set()
+    rendered_sources: list[str] = []
     for slot in selected_slots:
         if not isinstance(slot, dict):
             continue
@@ -1336,6 +1355,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         emoji = str(slot.get("emoji") or "📌")
         if slot_type == "ultimora":
             latest_item = item
+            rendered_sources.append(_news_item_source(item))
             overview.add_field(
                 name=format_standard_field_name("ULTIM'ORA", emoji="⚡"),
                 value=_build_single_news_field_value_with_emoji_tracking(
@@ -1348,6 +1368,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             )
             continue
         if slot_type == "featured":
+            rendered_sources.append(_news_item_source(item))
             overview.add_field(
                 name=format_standard_field_name("IN EVIDENZA", emoji="🌟"),
                 value=_build_single_news_field_value_with_emoji_tracking(
@@ -1362,7 +1383,7 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         editorial_categories.append((str(slot.get("category") or ""), display, emoji, item))
 
     detail_title = _format_news_title("HAMSTER NEWS • LE NOTIZIE")
-    secondary_fields: list[tuple[str, str]] = []
+    secondary_fields: list[tuple[str, str, str | None]] = []
     for category_key, display, emoji, item in editorial_categories:
         secondary_fields.append(
             (
@@ -1373,28 +1394,34 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
                     used_emojis=used_emojis,
                     seed_key=f"{category_key}:{_news_identity(item)}",
                 ),
+                _news_item_source(item),
             )
         )
-    secondary_fields.extend(_build_news_extra_fields(config, base_dt=now_utc))
+    secondary_fields.extend((field_name, field_value, None) for field_name, field_value in _build_news_extra_fields(config, base_dt=now_utc))
     next_run_field = _next_news_run_field(config, generated_at=now_utc)
     if next_run_field:
-        secondary_fields.append((format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"), next_run_field))
+        secondary_fields.append((format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"), next_run_field, None))
 
     embeds: list[discord.Embed] = [overview]
     detail = discord.Embed(title=detail_title, color=color)
-    detail.description = "Che ci racconta il mondo oggi?"
-    for field_name, field_value in secondary_fields:
+    detail.description = format_standard_description("Che ci racconta il mondo oggi?")
+    for field_name, field_value, field_source in secondary_fields:
         candidate = discord.Embed.from_dict(detail.to_dict())
         candidate.add_field(name=field_name, value=field_value, inline=False)
         if len(candidate.fields) > 25 or len(candidate) > 6000:
             if detail.fields:
                 embeds.append(detail)
             detail = discord.Embed(title=detail_title, color=color)
-            detail.description = "Che ci racconta il mondo oggi?"
+            detail.description = format_standard_description("Che ci racconta il mondo oggi?")
             detail.add_field(name=field_name, value=field_value, inline=False)
+            if field_source:
+                rendered_sources.append(field_source)
             continue
         detail = candidate
+        if field_source:
+            rendered_sources.append(field_source)
     embeds.append(detail)
+    payload["rendered_sources"] = _dedupe_preserve_order(rendered_sources)
     first_image_url = _first_story_image_url([(cat, d, e, [item]) for cat, d, e, item in editorial_categories])
     if first_image_url is None and latest_item is not None:
         first_image_url = _first_story_image_url([("ultimora", "Ultim'ora", "⚡", [latest_item])])
