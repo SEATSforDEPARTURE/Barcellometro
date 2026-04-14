@@ -1437,6 +1437,35 @@ def test_horoscope_fallback_is_brief_when_ai_fails() -> None:
     asyncio.run(_run())
 
 
+def test_horoscope_prompt_is_simple_and_quality_guard_rejects_broken_ai_output() -> None:
+    class _Ai:
+        def __init__(self) -> None:
+            self.ask_for_task = AsyncMock(return_value="Venuse Jupiters seiuna today focus.")
+
+        def is_enabled(self):
+            return True
+
+        def get_model_config(self, _task):
+            return "gpt-test"
+
+    async def _run() -> None:
+        payload = {"signs": {sign: {"horoscope": "You are reminded to stay calm today."} for sign in SIGN_ORDER}}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
+        prompt = service._build_horoscope_sign_prompt("testo sorgente")
+        assert "Massimo 2 frasi." in prompt
+        assert "Niente inglese." in prompt
+        assert "emoji" not in prompt.lower()
+        assert "grassetto" not in prompt.lower()
+        await service._rewrite_horoscope_payload(payload)
+        text = payload["signs"]["Ariete"]["horoscope"].lower()
+        assert "venuse" not in text
+        assert "jupiters" not in text
+        assert " today " not in f" {text} "
+        assert len(re.findall(r"[.!?]", payload["signs"]["Ariete"]["horoscope"])) <= 2
+
+    asyncio.run(_run())
+
+
 def test_weather_service_still_uses_editorial_ai_when_enabled() -> None:
     class _Channel(discord.abc.Messageable):
         async def _get_channel(self):
