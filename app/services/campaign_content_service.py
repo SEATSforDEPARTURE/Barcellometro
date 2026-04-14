@@ -40,6 +40,7 @@ from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
+from app.shared.discord.embed_limits import normalize_embeds_for_discord
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
@@ -215,6 +216,7 @@ class CampaignContentService:
             used_local_processing=not contributors,
         )
         await finalize_embeds(embeds, self._footer, default_service_name=footer_service_name)
+        embeds = normalize_embeds_for_discord(embeds)
         footer_text = getattr(embeds[0].footer, "text", None) or await self._build_campaign_footer(
             service_name=footer_service_name,
             used_sources=footer_sources,
@@ -786,7 +788,7 @@ class CampaignContentService:
         if service_type == "WEATHER":
             return build_weather_page_map()
         if service_type == "HOROSCOPE":
-            return build_horoscope_page_map()
+            return build_horoscope_page_map(len(payload_embeds))
         return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
 
     @staticmethod

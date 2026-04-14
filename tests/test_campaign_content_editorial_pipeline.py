@@ -20,7 +20,9 @@ if "httpx" not in sys.modules:
 
 from app.services.campaign_content_fetchers import dedupe_news_items
 from app.services.campaign_content_formatter import (
+    SIGN_ORDER,
     build_horoscope_embeds,
+    build_horoscope_page_map,
     build_news_embeds,
     build_news_page_map,
     news_edition_label_for_datetime,
@@ -28,6 +30,7 @@ from app.services.campaign_content_formatter import (
 )
 from app.services.campaign_content_service import CampaignContentService
 from app.services.database import DatabaseService
+from app.shared.discord.embed_limits import DISCORD_MAX_EMBED_TOTAL_CHARS, is_valid_embed
 
 
 def _normalize_standardized_title(title: str | None) -> str:
@@ -378,11 +381,40 @@ def test_build_horoscope_embeds_strip_inner_headings() -> None:
     for s in ["Ariete","Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Pesci"]:
         payload["signs"][s] = {"love":"ok","work":"ok","money":"ok","energy":"ok","friction":"ok","advice":"ok","confidence":1}
     embeds = build_horoscope_embeds({"embed_title": "🔮 OROSCOPO CRICETOSO"}, payload)
-    assert len(embeds) == 1
-    acquario_field = next(field for field in embeds[0].fields if "ACQUARIO" in field.name)
+    assert len(embeds) >= 2
+    acquario_field = next(field for embed in embeds[1:] for field in embed.fields if "ACQUARIO" in field.name)
     values = acquario_field.value or ""
     assert "Love Alert" not in values
     assert "Energia del genio" not in values
+
+
+def test_build_horoscope_embeds_paginate_signs_and_respect_embed_limits() -> None:
+    verbose = (
+        "Frase molto lunga ma utile per il contesto editoriale quotidiano. "
+        "Seconda frase per spingere il limite senza perdere leggibilità. "
+    ) * 8
+    payload = {
+        "generated_at": "2026-04-09T14:30:00+00:00",
+        "signs": {
+            sign: {"love": verbose, "work": verbose, "money": verbose, "energy": verbose, "friction": "ok", "advice": "ok", "confidence": 1.0}
+            for sign in SIGN_ORDER
+        },
+    }
+    embeds = build_horoscope_embeds({}, payload)
+    assert len(embeds) > 2
+    assert any(len(embed.fields) > 0 for embed in embeds[1:])
+    assert all(is_valid_embed(embed) for embed in embeds)
+    assert all(len(embed) <= DISCORD_MAX_EMBED_TOTAL_CHARS for embed in embeds)
+
+
+def test_build_horoscope_page_map_matches_embed_count() -> None:
+    page_map = build_horoscope_page_map(4)
+    assert page_map == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "signs", "key": "signs_1", "label": "Segni · Pagina 1", "page": 1},
+        {"type": "signs", "key": "signs_2", "label": "Segni · Pagina 2", "page": 2},
+        {"type": "signs", "key": "signs_3", "label": "Segni · Pagina 3", "page": 3},
+    ]
 
 
 def test_send_and_store_metadata_contains_page_map() -> None:
@@ -430,6 +462,54 @@ def test_send_and_store_metadata_contains_page_map() -> None:
         assert "page_map" in metadata
         assert metadata["page_map"] == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
         assert channel.last_view is None
+
+    asyncio.run(_run())
+
+
+def test_send_and_store_persists_normalized_embeds() -> None:
+    class _Db:
+        async def upsert_campaign_content_message(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def update_campaign_content_next_run(self, **kwargs):
+            self.next_kwargs = kwargs
+
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            self.sent_embed = kwargs.get("embed")
+            return SimpleNamespace(id=456)
+
+    channel = _Channel()
+
+    class _Bot:
+        def get_channel(self, _id):
+            return channel
+
+    async def _run() -> None:
+        db = _Db()
+        service = CampaignContentService(database=db, bot=_Bot(), ai_service=None)
+        service._build_campaign_footer = lambda **kwargs: asyncio.sleep(0, result="footer test")
+        config = {"guild_id": "1", "channel_id": "2", "id": 100, "interval_minutes": 60}
+        oversized = discord.Embed(title="x")
+        oversized.add_field(name="Campo", value="A" * 3500, inline=False)
+        oversized.add_field(name="Campo 2", value="B" * 3500, inline=False)
+        await service._send_and_store(
+            config,
+            [oversized],
+            "HOROSCOPE",
+            configured_sources=[],
+            used_sources=[],
+            used_model=None,
+            fallback_used=False,
+            payload={},
+        )
+        persisted = json.loads(db.kwargs["embeds_json"])
+        assert len(persisted) > 1
+        for item in persisted:
+            assert len(discord.Embed.from_dict(item)) <= DISCORD_MAX_EMBED_TOTAL_CHARS
 
     asyncio.run(_run())
 

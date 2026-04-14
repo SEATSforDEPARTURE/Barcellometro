@@ -13,6 +13,7 @@ from app.services.author import get_author_meta, render_author_name
 from app.services.campaign_content_formatter import (
     build_fallback_embed,
     build_horoscope_embeds,
+    build_horoscope_page_map,
     build_news_embeds,
     build_news_page_map,
     news_edition_label_for_datetime,
@@ -77,7 +78,7 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
     )
     assert "HAMSTER NEWS • EDIZIONE" in _title_inner_without_emoji(news[0].title or "")
     assert len(news) == 1
-    assert len(horoscope) == 1
+    assert len(horoscope) >= 1
     assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO CRICETOSO • EDIZIONE MATTUTINA"
     news_meta = [get_footer_meta(embed) for embed in news]
     horoscope_meta = [get_footer_meta(embed) for embed in horoscope]
@@ -289,7 +290,7 @@ def test_weather_and_horoscope_overview_have_editorial_intro() -> None:
 
 
 def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> None:
-    horoscope = build_horoscope_embeds(
+    horoscope_pages = build_horoscope_embeds(
         {"next_scheduled_run_at": "2026-04-09T17:30:00+00:00", "categories_json": "Ariete,Gemelli"},
         {
             "generated_at": "2026-04-09T14:30:00+00:00",
@@ -299,24 +300,35 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
                 "Toro": {"love": "Pazienza", "work": "Passo lento", "money": "Prudenza", "energy": "Bassa", "confidence": 0.2, "tone": "cauto"},
             },
         },
-    )[0]
-    field_map = {field.name: field.value or "" for field in horoscope.fields}
+    )
+    assert len(horoscope_pages) == 2
+    field_map = {field.name: field.value or "" for field in horoscope_pages[0].fields}
+    signs_field_map = {field.name: field.value or "" for field in horoscope_pages[1].fields}
 
-    assert horoscope.title == "🔮 __**OROSCOPO CRICETOSO • EDIZIONE POMERIDIANA**__"
+    assert horoscope_pages[0].title == "🔮 __**OROSCOPO CRICETOSO • EDIZIONE POMERIDIANA**__"
     assert "✨ __**SEGNI IN FORMA**__" in field_map
     assert "🫶 __**SEGNI DA TRATTARE CON PIÙ TATTO**__" in field_map
     assert "🌟 __**SEGNO DEL GIORNO**__" in field_map
     assert field_map["✨ __**SEGNI IN FORMA**__"].startswith("• **")
     assert field_map["🫶 __**SEGNI DA TRATTARE CON PIÙ TATTO**__"].startswith("• **")
     assert field_map["🌟 __**SEGNO DEL GIORNO**__"].splitlines()[0].startswith("• **")
-    assert field_map["♈ __**ARIETE**__"].startswith("• **Amore ❤️:** ")
-    assert field_map["♈ __**ARIETE**__"].count("\n") == 3
-    assert "• **Lavoro 💼:**" in field_map["♈ __**ARIETE**__"]
-    assert "• **Soldi 💰:**" in field_map["♈ __**ARIETE**__"]
-    assert "• **Energia ⚡:**" in field_map["♈ __**ARIETE**__"]
+    assert signs_field_map["♈ __**ARIETE**__"].startswith("• **Amore ❤️:** ")
+    assert signs_field_map["♈ __**ARIETE**__"].count("\n") == 3
+    assert "• **Lavoro 💼:**" in signs_field_map["♈ __**ARIETE**__"]
+    assert "• **Soldi 💰:**" in signs_field_map["♈ __**ARIETE**__"]
+    assert "• **Energia ⚡:**" in signs_field_map["♈ __**ARIETE**__"]
     assert "🔜 __**PROSSIMA EDIZIONE**__" in field_map
     assert field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("• Il criceto chiude il taccuino stellare per ora.")
     assert "• Ci rivediamo alle **19:30** con la prossima edizione." in field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+
+
+def test_horoscope_page_map_tracks_sign_pages() -> None:
+    assert build_horoscope_page_map(1) == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    assert build_horoscope_page_map(3) == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "signs", "key": "signs_1", "label": "Segni · Pagina 1", "page": 1},
+        {"type": "signs", "key": "signs_2", "label": "Segni · Pagina 2", "page": 2},
+    ]
 
 
 def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
