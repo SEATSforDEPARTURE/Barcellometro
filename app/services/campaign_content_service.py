@@ -816,7 +816,7 @@ class CampaignContentService:
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
             return None
-        used_model = self._resolve_ai_model_name("campaign_editorial")
+        used_model: str | None = None
         signs = payload.get("signs", {})
         compact = {sign: {"horoscope": str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
         for sign in SIGN_ORDER:
@@ -854,6 +854,12 @@ class CampaignContentService:
                     rewritten = self._postprocess_horoscope_text(sign, cleaned_candidate)
             if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
                 sign_payload["horoscope"] = rewritten
+                if used_model is None:
+                    get_model_cfg = getattr(self._ai, "get_model_config", None)
+                    if callable(get_model_cfg):
+                        configured_model = get_model_cfg("campaign_editorial")
+                        if isinstance(configured_model, str) and configured_model.strip():
+                            used_model = configured_model
                 logger.info("horoscope rewrite done sign=%s ai=true", sign)
                 continue
             sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=True)
