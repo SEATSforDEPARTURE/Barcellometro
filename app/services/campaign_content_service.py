@@ -53,6 +53,7 @@ from app.shared.discord.embed_limits import (
 )
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
+from app.services.translate.base import TranslateService, TranslationResult
 
 logger = logging.getLogger(__name__)
 _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 90.0
@@ -104,10 +105,17 @@ _HOROSCOPE_LONG_JOINED_TOKEN_RE = re.compile(r"\b[a-zàèéìòù]{16,}\b", flag
 
 
 class CampaignContentService:
-    def __init__(self, database: DatabaseService, bot: discord.Client, ai_service: Optional[AiService] = None) -> None:
+    def __init__(
+        self,
+        database: DatabaseService,
+        bot: discord.Client,
+        ai_service: Optional[AiService] = None,
+        translate_service: TranslateService | None = None,
+    ) -> None:
         self._database = database
         self._bot = bot
         self._ai = ai_service
+        self._translate = translate_service
         self._footer = FooterService(database)
         self._registered = False
 
@@ -215,18 +223,20 @@ class CampaignContentService:
             signs_fallback,
             bool(payload.get("fallback_used")),
         )
+        translation_contributor = await self._translate_horoscope_payload(payload)
         logger.info("horoscope rewrite enabled=%s", _HOROSCOPE_EDITORIAL_ENABLED)
         used_model: str | None = None
         if _HOROSCOPE_EDITORIAL_ENABLED:
             try:
                 used_model = await self._rewrite_horoscope_payload(payload)
             except Exception as exc:
-                logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
+                logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing translated payload", exc.__class__.__name__)
                 used_model = None
+                self._apply_horoscope_italian_fallback(payload)
         else:
             self._apply_horoscope_italian_fallback(payload)
-            self._enforce_horoscope_diversity(payload)
-            logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using italianized payload")
+            logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using translated payload")
+        self._enforce_horoscope_diversity(payload)
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
         logger.info("campaign content: horoscope build complete embeds=%s", len(embeds))
@@ -239,6 +249,7 @@ class CampaignContentService:
             used_model=used_model,
             fallback_used=bool(payload.get("fallback_used")),
             payload=payload,
+            extra_contributors=[translation_contributor] if translation_contributor else [],
         )
 
     async def _send_and_store(
@@ -252,6 +263,7 @@ class CampaignContentService:
         used_model: str | None,
         fallback_used: bool,
         payload: dict[str, Any] | None = None,
+        extra_contributors: list[str] | None = None,
     ) -> None:
         config = dict(config)
         now = datetime.now(timezone.utc)
@@ -264,7 +276,7 @@ class CampaignContentService:
                 effective_used_sources = rendered_sources
         footer_sources = self._format_campaign_sources(effective_used_sources or configured_sources, service_type=service_type)
         footer_service_name = self._campaign_footer_service_name(service_type)
-        contributors = [*footer_sources, *([used_model] if used_model else [])]
+        contributors = [*footer_sources, *[c for c in (extra_contributors or []) if c], *([used_model] if used_model else [])]
         attach_footer_meta_to_all(
             embeds,
             service_name=footer_service_name,
@@ -277,6 +289,7 @@ class CampaignContentService:
             service_name=footer_service_name,
             used_sources=footer_sources,
             used_model=used_model,
+            extra_contributors=extra_contributors,
         )
         apply_shared_footer_and_pagination(embeds, footer_text)
         embeds = enforce_embed_size_limit(embeds)
@@ -357,6 +370,7 @@ class CampaignContentService:
             "footer_text": footer_text,
             "configured_sources": configured_sources,
             "used_sources": effective_used_sources,
+            "extra_contributors": [c for c in (extra_contributors or []) if c],
             "ai_model_used": used_model,
             "used_model": used_model,
             "fallback_used": fallback_used,
@@ -766,24 +780,56 @@ class CampaignContentService:
             used_ai = used_ai or ai_used
         return self._resolve_ai_model_name("campaign_editorial") if used_ai else None
 
+    async def _translate_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
+        signs = payload.get("signs", {})
+        if not isinstance(signs, dict):
+            return None
+        if self._translate is None:
+            logger.info("horoscope translation provider=none reason=translate_service_missing")
+            return None
+        used_provider: str | None = None
+        for sign in SIGN_ORDER:
+            sign_payload = signs.get(sign, {})
+            if not isinstance(sign_payload, dict):
+                continue
+            source_text = str(sign_payload.get("horoscope") or "").strip()
+            if not source_text:
+                continue
+            translated = ""
+            try:
+                result = await self._translate.translate(source_text, "it", source_lang="en", backend="opusmt")
+                translated = str(result.text or "").strip()
+                used_provider = "OPUS-MT"
+                logger.info("horoscope translation provider=opusmt sign=%s", sign)
+            except Exception as exc:
+                logger.warning("horoscope translation provider=opusmt sign=%s failed=%s fallback=argos", sign, exc.__class__.__name__)
+                try:
+                    result = await self._translate.translate(source_text, "it", source_lang="en", backend="local")
+                    translated = str(result.text or "").strip()
+                    used_provider = used_provider or "Argos"
+                    logger.info("horoscope translation provider=argos sign=%s", sign)
+                except Exception as inner_exc:
+                    logger.warning("horoscope translation provider=argos sign=%s failed=%s", sign, inner_exc.__class__.__name__)
+            sign_payload["translated_horoscope"] = translated or source_text
+        return used_provider
+
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
             return None
         signs = payload.get("signs", {})
-        compact = {sign: {"horoscope": str(sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
+        compact = {sign: {"horoscope": str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
         ai_applied = False
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             if not isinstance(sign_payload, dict):
                 continue
             source_text = str(compact.get(sign, {}).get("horoscope") or "")
-            provider_available = bool(source_text.strip()) and not bool(sign_payload.get("fallback_used"))
             if not source_text.strip():
                 logger.info("horoscope rewrite start sign=%s ai=false reason=empty_source", sign)
                 sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text)
                 logger.info("horoscope rewrite fallback sign=%s reason=empty_source", sign)
                 continue
-            logger.info("horoscope rewrite start sign=%s ai=true timeout=%.1fs", sign, _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS)
+            logger.info("horoscope rewrite using llama sign=%s timeout=%.1fs", sign, _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS)
             candidate = ""
             try:
                 prompt = self._build_horoscope_sign_prompt(source_text)
@@ -801,8 +847,9 @@ class CampaignContentService:
             rewritten = ""
             if isinstance(candidate, str) and candidate.strip():
                 cleaned_candidate = self._sanitize_editorial_text(candidate)
-                if self._is_horoscope_ai_output_invalid(cleaned_candidate):
-                    logger.info("horoscope rewrite fallback sign=%s reason=ai_quality_guard", sign)
+                acceptable, reason = self._is_horoscope_output_acceptable(cleaned_candidate)
+                if not acceptable:
+                    logger.info("horoscope quality_guard rejected sign=%s reason=%s", sign, reason)
                 else:
                     rewritten = self._postprocess_horoscope_text(sign, cleaned_candidate)
             if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
@@ -810,45 +857,11 @@ class CampaignContentService:
                 ai_applied = True
                 logger.info("horoscope rewrite done sign=%s ai=true", sign)
                 continue
-            sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=provider_available)
+            sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=True)
             logger.info("horoscope rewrite fallback sign=%s reason=ai_unusable", sign)
 
         self._enforce_horoscope_diversity(payload, original_signs=compact)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
-
-    @staticmethod
-    def _should_italianize_horoscope_text(text: str) -> bool:
-        cleaned = str(text or "").strip()
-        if not cleaned:
-            return False
-        lowered = f" {cleaned.lower()} "
-        forced_markers = (
-            " you ",
-            " your ",
-            " today ",
-            " stay calm ",
-            " reminded ",
-            " focus on ",
-            " take a ",
-            " listen to ",
-        )
-        if any(marker in lowered for marker in forced_markers):
-            return True
-        tokens = re.findall(r"[a-zàèéìòù']+", cleaned.lower())
-        if not tokens:
-            return False
-        italian_tokens = {
-            "amore", "lavoro", "soldi", "spese", "energia", "discussioni", "tensioni",
-            "oggi", "consiglio", "con", "per", "una", "uno", "il", "la", "che", "non", "nel", "sul",
-        }
-        english_tokens = {
-            "you", "your", "today", "stay", "calm", "reminded", "focus", "take", "listen",
-            "work", "love", "money", "energy", "friction", "advice", "and", "the", "with", "on",
-            "be", "is", "are", "keep", "careful",
-        }
-        it_hits = sum(1 for token in tokens if token in italian_tokens)
-        en_hits = sum(1 for token in tokens if token in english_tokens)
-        return en_hits >= 2 and it_hits == 0
 
     @staticmethod
     def _looks_non_italian_or_mixed(text: str) -> bool:
@@ -880,18 +893,6 @@ class CampaignContentService:
         fallback = self._build_brief_horoscope_fallback(source)
         return self._append_horoscope_emoji(self._postprocess_horoscope_text(sign, fallback, with_emoji=False), sign=sign)
 
-    def _apply_horoscope_local_fallback(self, payload: dict[str, Any]) -> None:
-        signs = payload.get("signs")
-        if not isinstance(signs, dict):
-            return
-        for sign in SIGN_ORDER:
-            sign_payload = signs.get(sign)
-            if not isinstance(sign_payload, dict):
-                continue
-            for section in HOROSCOPE_SECTIONS:
-                original = str(sign_payload.get(section) or "")
-                sign_payload[section] = self._build_horoscope_local_fallback(sign, original)
-
     async def _reapply_author_after_split(self, embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
         for embed in embeds:
             embed.remove_author()
@@ -916,7 +917,7 @@ class CampaignContentService:
             if not isinstance(sign_payload, dict):
                 continue
             text = str(sign_payload.get("horoscope") or "").strip()
-            source_text = str((original_signs or {}).get(sign, {}).get("horoscope") or text)
+            source_text = str((original_signs or {}).get(sign, {}).get("horoscope") or sign_payload.get("translated_horoscope") or text)
             if force_override or not text or self._looks_non_italian_or_mixed(text):
                 provider_available = not bool(sign_payload.get("fallback_used")) and bool(source_text.strip())
                 sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=provider_available)
@@ -951,49 +952,35 @@ class CampaignContentService:
             rendered[sign] = combined
 
     @staticmethod
-    def _content_preserving_localize_section(section: str, text: str) -> str:
-        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
-        if not normalized:
-            return ""
-        replacements = (
-            ("you are reminded to", "ricordati di"),
-            ("you are", "sei"),
-            ("your", "tuo"),
-            ("today", "oggi"),
-            ("stay calm", "mantieni la calma"),
-            ("focus on", "focalizzati su"),
-            ("reconnect with", "riavvicinati a"),
-            ("rebuild", "ricostruisci"),
-            ("take a", "fai un"),
-            ("listen to", "ascolta"),
-            ("avoid", "evita"),
-            ("close", "chiudi"),
-            ("review", "rivedi"),
-            ("postpone", "rimanda"),
-            ("choose", "scegli"),
-            ("work", "lavoro"),
-            ("love", "amore"),
-            ("money", "soldi"),
-            ("energy", "energia"),
-            ("trust", "fiducia"),
-            ("subscription", "abbonamento"),
-            ("careful", "prudente"),
-        )
-        localized = normalized
-        for src, dst in replacements:
-            localized = re.sub(rf"\b{re.escape(src)}\b", dst, localized, flags=re.IGNORECASE)
-        return localized
-
-    @staticmethod
     def _build_horoscope_sign_prompt(horoscope: str) -> str:
         return (
-            "Riscrivi questo oroscopo in italiano corretto e naturale.\n"
-            "Massimo 2 frasi.\n"
+            "Riscrivi questo oroscopo in italiano naturale.\n"
+            "Massimo 2 frasi, tono simpatico, leggero e cricetoso.\n"
+            "Niente frasi meta come 'ecco la traduzione' o 'versione italiana'.\n"
             "Niente inglese.\n"
-            "Tono semplice e scorrevole.\n\n"
+            "Una sola emoji alla fine.\n"
+            "Metti in **grassetto** solo le parole importanti.\n\n"
             "Testo:\n"
             f"{horoscope}"
         )
+
+    def _is_horoscope_output_acceptable(self, text: str) -> tuple[bool, str]:
+        cleaned = str(text or "").strip()
+        lowered = cleaned.lower()
+        if not cleaned:
+            return False, "empty"
+        if re.search(r"(?i)\\b(?:ecco la traduzione|versione italiana|ecco il testo|testo tradotto)\\b", cleaned):
+            return False, "meta_phrase"
+        if self._looks_non_italian_or_mixed(cleaned):
+            return False, "english_residual"
+        if len(self._split_sentences(cleaned)) > 2:
+            return False, "too_many_sentences"
+        if len(cleaned) > 340:
+            return False, "too_long"
+        words = re.findall(r"[a-zàèéìòù']+", lowered)
+        if len(set(words)) <= 6:
+            return False, "too_generic"
+        return True, "ok"
 
     @staticmethod
     def _split_sentences(text: str) -> list[str]:
@@ -1002,15 +989,6 @@ class CampaignContentService:
             return []
         parts = re.split(r"(?<=[.!?])\s+", normalized)
         return [part.strip() for part in parts if part.strip()]
-
-    def _fallback_short_horoscope_translation(self, text: str) -> str:
-        normalized = re.sub(r"\s+", " ", str(text or "")).strip()
-        if not normalized:
-            return "Oggi tieni il passo con **calma lucida** e scegli una sola priorità."
-        first_two = " ".join(self._split_sentences(normalized)[:2]).strip() or normalized[:200].strip()
-        clipped = first_two[:200].strip()
-        translated = self._content_preserving_localize_section("horoscope", clipped)
-        return translated or clipped
 
     def _build_brief_horoscope_fallback(self, text: str) -> str:
         lowered = f" {str(text or '').lower()} "
@@ -1367,6 +1345,11 @@ class CampaignContentService:
             if token and token not in seen:
                 contributors.append(token)
                 seen.add(token)
+        for token in metadata.get("extra_contributors") or []:
+            label = str(token or "").strip()
+            if label and label not in seen:
+                contributors.append(label)
+                seen.add(label)
         model = str(metadata.get("used_model") or metadata.get("ai_model_used") or "").strip()
         if model and model not in {"unknown"} and model not in seen:
             contributors.append(model)
@@ -1392,8 +1375,15 @@ class CampaignContentService:
         )
         return embed
 
-    async def _build_campaign_footer(self, *, service_name: str, used_sources: list[str], used_model: str | None) -> str:
-        contributors = list(used_sources)
+    async def _build_campaign_footer(
+        self,
+        *,
+        service_name: str,
+        used_sources: list[str],
+        used_model: str | None,
+        extra_contributors: list[str] | None = None,
+    ) -> str:
+        contributors = [*used_sources, *[c for c in (extra_contributors or []) if c]]
         model = (used_model or "").strip()
         if model and model not in contributors:
             contributors.append(model)

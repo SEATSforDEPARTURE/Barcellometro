@@ -8,7 +8,15 @@ class AiTranslateService:
     def __init__(self, ai_service: AiService) -> None:
         self._ai_service = ai_service
 
-    async def translate(self, text: str, target_lang: str) -> TranslationResult:
+    async def translate(
+        self,
+        text: str,
+        target_lang: str,
+        *,
+        source_lang: str | None = None,
+        backend: str | None = None,
+    ) -> TranslationResult:
+        _ = backend
         if not self._ai_service.is_enabled():
             raise RuntimeError("AI disabled")
         model_cfg = self._ai_service.get_model_config("translation")
@@ -23,7 +31,7 @@ class AiTranslateService:
             raise RuntimeError("AI translation unavailable")
         return TranslationResult(
             text=output_text.strip(),
-            source_lang="auto",
+            source_lang=source_lang or "auto",
             target_lang=target_lang,
             backend="ai",
             model=self._ai_service.get_model_display_name("translation"),

@@ -31,6 +31,7 @@ from app.services.stt.faster_whisper import FasterWhisperSttService
 from app.services.triggers_service import TriggerEngineService
 from app.services.translate.ai_translate import AiTranslateService
 from app.services.translate.argos import ArgosTranslateService
+from app.services.translate.service import TranslationService
 from app.services.aura import AuraAggregationJob, AuraEligibilityService, AuraRollingStatsService, ArchetypeAnalyzerService
 from app.services.author import AuthorService
 from app.services.description_template_service import DescriptionTemplateService
@@ -98,6 +99,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
     stt_ai_service = None
     translate_local_service = None
     translate_ai_service = None
+    translate_service = None
     message_scheduler = None
     campaign_content_service = None
     barcello_service = None
@@ -139,7 +141,8 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         stt_ai_service = AiSttService(database_service, ai_service)
         translate_local_service = ArgosTranslateService()
         translate_ai_service = AiTranslateService(ai_service)
-        campaign_content_service = CampaignContentService(database_service, bot, ai_service=ai_service)
+        translate_service = TranslationService(argos=translate_local_service, ai=translate_ai_service)
+        campaign_content_service = CampaignContentService(database_service, bot, ai_service=ai_service, translate_service=translate_service)
         message_scheduler = MessageSchedulerService(
             database_service,
             bot,
@@ -203,6 +206,7 @@ def create_bot(config: AppConfig) -> tuple[commands.Bot, ServiceRegistry]:
         registry.register("stt.ai", stt_ai_service)
         registry.register("translate.local", translate_local_service)
         registry.register("translate.ai", translate_ai_service)
+        registry.register("translate", translate_service)
 
     plugin_loader = PluginLoader(registry)
     mandatory_plugins = ["app.plugins.discord_adapter"] if instance_mode == "main" else []

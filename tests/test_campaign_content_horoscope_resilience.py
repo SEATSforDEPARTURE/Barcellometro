@@ -154,3 +154,31 @@ def test_execute_horoscope_service_uses_async_fetch_path() -> None:
         assert metadata["used_model"] is None
 
     asyncio.run(_run())
+
+
+def test_horoscope_translation_layer_prefers_opus_and_falls_back_to_argos() -> None:
+    class _Translator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        async def translate(self, text: str, target_lang: str, *, source_lang: str | None = None, backend: str | None = None):
+            _ = source_lang
+            self.calls.append((text, str(backend)))
+            if backend == "opusmt":
+                raise RuntimeError("missing model")
+            return SimpleNamespace(text=f"it::{text}", model="argos")
+
+    service = CampaignContentService(
+        database=SimpleNamespace(),
+        bot=SimpleNamespace(),
+        ai_service=None,
+        translate_service=_Translator(),
+    )
+    payload = {"signs": {"Ariete": {"horoscope": "Today focus on one task."}}}
+
+    async def _run() -> None:
+        provider = await service._translate_horoscope_payload(payload)
+        assert provider == "Argos"
+        assert payload["signs"]["Ariete"]["translated_horoscope"].startswith("it::")
+
+    asyncio.run(_run())
