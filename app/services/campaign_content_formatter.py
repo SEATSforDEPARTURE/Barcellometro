@@ -1411,7 +1411,8 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     if not selected_signs:
         selected_signs = {slugify_label(sign) for sign in SIGN_ORDER}
 
-    overview = discord.Embed(title=f"🔮 {format_standard_title(f'OROSCOPO CRICETOSO • {edition_label}')}", color=color)
+    base_title = f"🔮 {format_standard_title(f'OROSCOPO CRICETOSO • {edition_label}')}"
+    overview = discord.Embed(title=base_title, color=color)
     overview.description = format_standard_description((
         f"**{greeting}** 🐹: qui **Barcellometro in regia**, con il quadro zodiacale della giornata. "
         f"**Segni in forma**, **vibrazioni da tenere d'occhio** e **stelle dritte al punto**."
@@ -1452,6 +1453,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
             sentence = f"{sentence}."
         return f"{sentence} {emoji}"
 
+    sign_fields: list[tuple[str, str]] = []
     for sign in SIGN_ORDER:
         if slugify_label(sign) not in selected_signs:
             continue
@@ -1462,11 +1464,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
             f"• **Soldi 💰:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('money') or '')), fallback='Tieni il budget sotto controllo prima delle spese impulsive', emoji='💰')}\n"
             f"• **Energia ⚡:** {_single_sentence(sanitize_horoscope_text(sign, str(data.get('energy') or '')), fallback='Buona carica, ma va incanalata con più equilibrio', emoji='⚡')}"
         )
-        overview.add_field(
-            name=format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")),
-            value=summary[:1024],
-            inline=False,
-        )
+        sign_fields.append((format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")), summary[:1024]))
     next_run = _next_campaign_run_time(config)
     if next_run is not None:
         overview.add_field(
@@ -1477,11 +1475,37 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
             ),
             inline=False,
         )
-    return _apply_campaign_footer([overview], service_name="campagne_oroscopo")
+    embeds: list[discord.Embed] = [overview]
+    if sign_fields:
+        current = discord.Embed(title=base_title, color=color)
+        for field_name, field_value in sign_fields:
+            candidate = discord.Embed.from_dict(current.to_dict())
+            candidate.add_field(name=field_name, value=field_value, inline=False)
+            if len(candidate.fields) > 25 or len(candidate) > 6000:
+                if current.fields:
+                    embeds.append(current)
+                current = discord.Embed(title=base_title, color=color)
+                current.add_field(name=field_name, value=field_value, inline=False)
+                continue
+            current = candidate
+        if current.fields:
+            embeds.append(current)
+    return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")
 
 
-def build_horoscope_page_map() -> list[dict[str, Any]]:
-    return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+def build_horoscope_page_map(total_pages: int = 1) -> list[dict[str, Any]]:
+    safe_total = max(1, int(total_pages or 1))
+    page_map = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    for idx in range(1, safe_total):
+        page_map.append(
+            {
+                "type": "signs",
+                "key": f"signs_{idx}",
+                "label": f"Segni · Pagina {idx}",
+                "page": idx,
+            }
+        )
+    return page_map
 
 
 def build_fallback_embed(config: dict[str, Any], sources: list[str], *, service_name: str = "campagne_notizie") -> list[discord.Embed]:
