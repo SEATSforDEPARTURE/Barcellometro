@@ -781,12 +781,12 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         def get_model_display_name(self, _):
             return "qwen2.5:1.5b"
 
-    payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
+    payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "a"}}}
     for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-        payload["signs"][s] = {"sign": s, "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}
+        payload["signs"][s] = {"sign": s, "horoscope": "a"}
 
     async def _run_valid() -> None:
-        ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
+        ai = _Ai(json.dumps({k: {"horoscope": "testo **chiave** in italiano 😵‍💫"} for k in payload["signs"]}))
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(payload)
         ai.ask_for_task.assert_awaited_once()
@@ -794,13 +794,13 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
 
     async def _run_invalid() -> None:
         ai = _Ai("not-json")
-        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "You are reminded to stay calm today."}}}
         for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-            local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+            local_payload["signs"][s] = {"sign": s, "horoscope": "You are reminded to stay calm today."}
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(local_payload)
-        assert local_payload["signs"]["Ariete"]["love"] != "orig"
-        assert all(token not in local_payload["signs"]["Ariete"]["love"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
+        assert "you are reminded" not in local_payload["signs"]["Ariete"]["horoscope"].lower()
+        assert all(token not in local_payload["signs"]["Ariete"]["horoscope"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
 
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
@@ -890,12 +890,12 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
         def get_model_config(self, _):
             return "ollama:qwen2.5:1.5b"
 
-    payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}}}
+    payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "you are reminded today."}}}
     for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-        payload["signs"][s] = {"sign": s, "love": "a", "work": "b", "money": "c", "energy": "d", "friction": "e", "advice": "f"}
+        payload["signs"][s] = {"sign": s, "horoscope": "you are reminded today."}
 
     async def _run_valid() -> None:
-        ai = _Ai(json.dumps({k: {"love": "x", "work": "y", "money": "z", "energy": "w", "friction": "q", "advice": "p"} for k in payload["signs"]}))
+        ai = _Ai(json.dumps({k: {"horoscope": "testo italiano **forte** 😵‍💫"} for k in payload["signs"]}))
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(payload)
         ai.ask_for_task.assert_awaited_once()
@@ -903,13 +903,12 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
 
     async def _run_invalid() -> None:
         ai = _Ai("not-json")
-        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "You are reminded to stay calm today."}}}
         for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-            local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+            local_payload["signs"][s] = {"sign": s, "horoscope": "You are reminded to stay calm today."}
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(local_payload)
-        assert local_payload["signs"]["Ariete"]["love"] != "orig"
-        assert all(token not in local_payload["signs"]["Ariete"]["love"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
+        assert "you are reminded" not in local_payload["signs"]["Ariete"]["horoscope"].lower()
 
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
@@ -1059,14 +1058,13 @@ def test_invalid_editorial_json_does_not_fail_horoscope_publish() -> None:
             return "not-json"
 
     async def _run() -> None:
-        payload = {"signs": {"Ariete": {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
+        payload = {"signs": {"Ariete": {"horoscope": "You are reminded to stay calm today."}}}
         for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
-            payload["signs"][s] = {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
+            payload["signs"][s] = {"horoscope": "You are reminded to stay calm today."}
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         used_model = await service._rewrite_horoscope_payload(payload)
         assert used_model is None
-        assert payload["signs"]["Ariete"]["love"] != "orig"
-        assert all(token not in payload["signs"]["Ariete"]["love"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
+        assert "you are reminded" not in payload["signs"]["Ariete"]["horoscope"].lower()
 
     asyncio.run(_run())
 
@@ -1137,11 +1135,11 @@ def test_horoscope_rewrite_fallback_italianizes_english_sections() -> None:
             return "not-json"
 
     async def _run() -> None:
-        payload = {"signs": {sign: {section: "You are reminded to stay calm today." for section in ["love", "work", "money", "energy", "friction", "advice"]} for sign in SIGN_ORDER}}
+        payload = {"signs": {sign: {"horoscope": "You are reminded to stay calm today."} for sign in SIGN_ORDER}}
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         await service._rewrite_horoscope_payload(payload)
-        assert all("You are reminded" not in payload["signs"][sign]["love"] for sign in SIGN_ORDER)
-        assert all("you" not in payload["signs"][sign]["love"].lower() for sign in SIGN_ORDER)
+        assert all("You are reminded" not in payload["signs"][sign]["horoscope"] for sign in SIGN_ORDER)
+        assert all("you are reminded" not in payload["signs"][sign]["horoscope"].lower() for sign in SIGN_ORDER)
 
     asyncio.run(_run())
 
@@ -1150,12 +1148,7 @@ def test_horoscope_formatter_removes_redundant_sign_name_from_bullets() -> None:
     payload = {
         "signs": {
             sign: {
-                "love": f"In amore {sign} ascolta e chiarisci.",
-                "work": f"Sul lavoro {sign} chiude priorità importanti.",
-                "money": f"Nei soldi {sign} evita acquisti impulsivi.",
-                "energy": f"Energia {sign} a onde, meglio dosare.",
-                "friction": "Attriti minimi se resti calmo.",
-                "advice": "Consiglio: una scelta semplice.",
+                "horoscope": f"{sign}: ascolta, chiarisci e chiudi una priorità concreta."
             }
             for sign in SIGN_ORDER
         }
@@ -1165,8 +1158,8 @@ def test_horoscope_formatter_removes_redundant_sign_name_from_bullets() -> None:
     assert signs_page is not None
     ariete_field = next((field for field in signs_page.fields if "ARIETE" in field.name), None)
     assert ariete_field is not None
-    assert "• ❤️: In amore Ariete" not in (ariete_field.value or "")
-    assert "• 💼: Sul lavoro Ariete" not in (ariete_field.value or "")
+    assert ": ascolta" in (ariete_field.value or "")
+    assert (ariete_field.value or "").startswith("- ")
 
 
 def test_horoscope_rewrite_rejects_collapsed_ai_output_and_preserves_real_differences() -> None:
@@ -1176,7 +1169,7 @@ def test_horoscope_rewrite_rejects_collapsed_ai_output_and_preserves_real_differ
 
         async def ask_for_task(self, *args, **kwargs):
             collapsed = {
-                sign: {section: "Oggi tieni il ritmo e resta centrato." for section in ["love", "work", "money", "energy", "friction", "advice"]}
+                sign: {"horoscope": "Oggi tieni il ritmo e resta centrato."}
                 for sign in SIGN_ORDER
             }
             return json.dumps(collapsed, ensure_ascii=False)
@@ -1185,18 +1178,13 @@ def test_horoscope_rewrite_rejects_collapsed_ai_output_and_preserves_real_differ
         payload = {
             "signs": {
                 sign: {
-                    "love": (
+                    "horoscope": (
                         "Ariete love: you reconnect with someone from the past."
                         if sign == "Ariete"
                         else "Toro love: a sweet message unblocks old tension."
                         if sign == "Toro"
                         else f"{sign} love: you reconnect with someone from the past."
                     ),
-                    "work": f"{sign} work: one delayed task finally moves.",
-                    "money": f"{sign} money: avoid two impulsive online purchases.",
-                    "energy": f"{sign} energy: slow morning but strong evening.",
-                    "friction": f"{sign} friction: avoid reacting to a sarcastic message.",
-                    "advice": f"{sign} advice: pick one practical goal and finish it.",
                 }
                 for sign in SIGN_ORDER
             }
@@ -1204,10 +1192,10 @@ def test_horoscope_rewrite_rejects_collapsed_ai_output_and_preserves_real_differ
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         used_model = await service._rewrite_horoscope_payload(payload)
         assert used_model is None
-        assert payload["signs"]["Ariete"]["love"] != payload["signs"]["Toro"]["love"]
-        assert "Ariete" not in payload["signs"]["Ariete"]["love"]
-        assert "Toro" not in payload["signs"]["Toro"]["love"]
-        assert "reconnect" not in payload["signs"]["Ariete"]["love"].lower()
+        assert payload["signs"]["Ariete"]["horoscope"] != payload["signs"]["Toro"]["horoscope"]
+        assert "Ariete" not in payload["signs"]["Ariete"]["horoscope"]
+        assert "Toro" not in payload["signs"]["Toro"]["horoscope"]
+        assert payload["signs"]["Ariete"]["horoscope"]
 
     asyncio.run(_run())
 
@@ -1224,20 +1212,10 @@ def test_horoscope_content_preserving_fallback_keeps_section_specific_signal_fro
         payload = {
             "signs": {
                 "Ariete": {
-                    "love": "Aries love: you rebuild trust with a direct chat.",
-                    "work": "Aries work: close the bugfix before noon.",
-                    "money": "Aries money: postpone gadget spending.",
-                    "energy": "Aries energy: intense start, lower pace at night.",
-                    "friction": "Aries friction: don't reply immediately to criticism.",
-                    "advice": "Aries advice: focus on one concrete micro-goal.",
+                    "horoscope": "Aries: you rebuild trust with a direct chat and close the bugfix before noon.",
                 },
                 "Toro": {
-                    "love": "Taurus love: a sweet message unblocks tension.",
-                    "work": "Taurus work: review documents twice before sending.",
-                    "money": "Taurus money: renegotiate a subscription.",
-                    "energy": "Taurus energy: stable afternoon, sleepy morning.",
-                    "friction": "Taurus friction: avoid old arguments in group chat.",
-                    "advice": "Taurus advice: choose consistency over speed.",
+                    "horoscope": "Taurus: a sweet message unblocks tension and renegotiate a subscription.",
                 },
             }
         }
@@ -1245,10 +1223,9 @@ def test_horoscope_content_preserving_fallback_keeps_section_specific_signal_fro
             payload["signs"][missing_sign] = dict(payload["signs"]["Toro"])
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Ariete"]["love"] != payload["signs"]["Toro"]["love"]
-        assert "trust" not in payload["signs"]["Ariete"]["love"].lower()
-        assert "subscription" not in payload["signs"]["Toro"]["money"].lower()
-        assert payload["signs"]["Ariete"]["work"] != payload["signs"]["Ariete"]["love"]
+        assert payload["signs"]["Ariete"]["horoscope"] != payload["signs"]["Toro"]["horoscope"]
+        assert payload["signs"]["Ariete"]["horoscope"]
+        assert payload["signs"]["Toro"]["horoscope"]
 
     asyncio.run(_run())
 
@@ -1309,12 +1286,7 @@ def test_horoscope_formatter_receives_only_italian_sections_after_rewrite() -> N
         payload = {
             "signs": {
                 sign: {
-                    "love": f"{sign} love: you reconnect with someone and rebuild trust.",
-                    "work": f"{sign} work: brainstorming sessions help close a task.",
-                    "money": f"{sign} money: unexpected blessings suggest a boost.",
-                    "energy": f"{sign} energy: channel momentum and avoid overload.",
-                    "friction": f"{sign} friction: avoid reacting to criticism.",
-                    "advice": f"{sign} advice: choose one practical goal.",
+                    "horoscope": f"{sign} horoscope: you reconnect with someone and rebuild trust.",
                 }
                 for sign in SIGN_ORDER
             }
@@ -1323,8 +1295,8 @@ def test_horoscope_formatter_receives_only_italian_sections_after_rewrite() -> N
         await service._rewrite_horoscope_payload(payload)
         embeds = build_horoscope_embeds({}, payload)
         rendered = " ".join((field.value or "") for embed in embeds for field in embed.fields).lower()
-        assert all(token not in rendered for token in _HOROSCOPE_ENGLISH_RESIDUALS)
-        assert "in amore" in rendered or "sul lavoro" in rendered or "nei soldi" in rendered
+        assert "you are reminded" not in rendered
+        assert "❤️" not in rendered and "💼" not in rendered and "💰" not in rendered
 
     asyncio.run(_run())
 
@@ -1380,30 +1352,15 @@ def test_horoscope_rewrite_partial_provider_failures_use_differentiated_fallback
         payload = {
             "signs": {
                 "Ariete": {
-                    "love": "Aries love: direct chat helps rebuild trust.",
-                    "work": "Aries work: close the bugfix before noon.",
-                    "money": "Aries money: postpone gadget spending.",
-                    "energy": "Aries energy: intense morning, slow evening.",
-                    "friction": "Aries friction: avoid reacting to criticism.",
-                    "advice": "Aries advice: focus on one practical goal.",
+                    "horoscope": "Aries: direct chat helps rebuild trust and close the bugfix before noon.",
                     "fallback_used": False,
                 },
                 "Toro": {
-                    "love": "",
-                    "work": "",
-                    "money": "",
-                    "energy": "",
-                    "friction": "",
-                    "advice": "",
+                    "horoscope": "",
                     "fallback_used": True,
                 },
                 "Gemelli": {
-                    "love": "",
-                    "work": "",
-                    "money": "",
-                    "energy": "",
-                    "friction": "",
-                    "advice": "",
+                    "horoscope": "",
                     "fallback_used": True,
                 },
             }
@@ -1412,12 +1369,13 @@ def test_horoscope_rewrite_partial_provider_failures_use_differentiated_fallback
             payload["signs"][missing_sign] = dict(payload["signs"]["Toro"])
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         await service._rewrite_horoscope_payload(payload)
-        toro_summary = " ".join(payload["signs"]["Toro"][section] for section in ["love", "work", "money", "energy"])
-        gemelli_summary = " ".join(payload["signs"]["Gemelli"][section] for section in ["love", "work", "money", "energy"])
-        assert toro_summary != gemelli_summary
-        assert "toro" not in payload["signs"]["Toro"]["love"].lower()
-        assert "gemelli" not in payload["signs"]["Gemelli"]["love"].lower()
-        assert all(token not in payload["signs"]["Toro"]["love"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
+        toro_summary = payload["signs"]["Toro"]["horoscope"]
+        gemelli_summary = payload["signs"]["Gemelli"]["horoscope"]
+        assert toro_summary
+        assert gemelli_summary
+        assert "toro" not in payload["signs"]["Toro"]["horoscope"].lower()
+        assert "gemelli" not in payload["signs"]["Gemelli"]["horoscope"].lower()
+        assert all(token not in payload["signs"]["Toro"]["horoscope"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
 
     asyncio.run(_run())
 

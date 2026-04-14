@@ -793,9 +793,10 @@ class CampaignContentService:
         prompt = (
             "Riscrivi/traduci in italiano il seguente JSON oroscopo e restituisci SOLO JSON valido con la stessa struttura. "
             "VINCOLI: italiano obbligatorio, significato originale invariato, nessuna invenzione astrologica, nessuna uniformazione tra segni. "
-            "Tratta ogni segno e ogni sezione separatamente (love/work/money/energy/friction/advice). "
-            "Ogni sezione deve contenere UNA SOLA frase naturale. "
-            "Non aggiungere prefazioni, markdown, titoli o nome del segno nel testo.\n"
+            "Per ogni segno usa solo il campo `horoscope`: produci una sola frase (massimo due frasi brevi fuse) in tono cricetoso, simpatico, trash leggero, semplice e divertente. "
+            "Niente strutture artificiali tipo amore/lavoro/soldi/energia. Inserisci 1-2 faccine nel testo ma non all'inizio. "
+            "Metti in **grassetto** solo parole importanti. Evita inglesismi inutili e tono poetico/solenne. "
+            "Non aggiungere prefazioni, markdown extra, titoli o nome del segno nel testo.\n"
             f"JSON input:\n{json.dumps(compact, ensure_ascii=False)}"
         )
         output: str | None = None
@@ -969,6 +970,22 @@ class CampaignContentService:
 
     def _rewrite_section_to_safe_italian(self, sign: str, section: str, original_text: str, *, provider_available: bool) -> str:
         normalized = self._normalize_horoscope_section_text(sign, section, original_text)
+        if section == "horoscope":
+            base = normalized or "Giornata da gestire con calma: scegli una priorità concreta e non fare troppo cinema."
+            base = re.sub(r"\s+", " ", base).strip(" -")
+            if not re.search(r"\*\*[^*]+\*\*", base):
+                words = base.split()
+                if words:
+                    focus_len = 2 if len(words) >= 6 else 1
+                    focus = " ".join(words[:focus_len])
+                    remainder = " ".join(words[focus_len:]).strip()
+                    base = f"**{focus}** {remainder}".strip()
+            if not re.search(r"[😀-🙏🌀-🫶✨🔥💫😵‍💫]", base):
+                base = f"{base} 😵‍💫✨"
+            base = re.sub(r"^[^\wÀ-ÿ]+", "", base).strip()
+            if not base.endswith((".", "!", "?")):
+                base = f"{base}."
+            return self._normalize_horoscope_section_text(sign, section, base)
         if not provider_available:
             return self._synthetic_horoscope_fallback(sign, section)
         if not normalized:
@@ -1082,6 +1099,7 @@ class CampaignContentService:
                 "energy": "Energia a onde: alterna sprint e recupero.",
                 "friction": "Evita risposte a caldo e abbassa i toni.",
                 "advice": "Consiglio cricetoso: un passo piccolo ma concreto.",
+                "horoscope": "Oggi tieni il punto su una sola priorità: meno caos, più **chiarezza** con stile 😵‍💫✨.",
             }
             return sanitize_horoscope_text(sign, empty_fallbacks.get(section, "Mantieni il passo con calma."))
         if not force_italianize and not self._looks_non_italian_or_mixed(normalized):

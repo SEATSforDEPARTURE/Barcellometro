@@ -1017,23 +1017,6 @@ def fetch_weather_content(sources: list[str]) -> dict[str, Any]:
     }
 
 
-def _split_horoscope_sections(text: str) -> dict[str, str]:
-    cleaned = re.sub(r"\s+", " ", text).strip()
-    clauses = [chunk.strip(" -") for chunk in re.split(r"(?<=[.!?;])\s+", cleaned) if chunk.strip()]
-    if not clauses:
-        clauses = [cleaned] if cleaned else []
-    love = clauses[0] if clauses else ""
-    work = clauses[1] if len(clauses) > 1 else clauses[0] if clauses else ""
-    money = clauses[2] if len(clauses) > 2 else ""
-    energy = clauses[3] if len(clauses) > 3 else ""
-    return {
-        "love": love,
-        "work": work,
-        "money": money,
-        "energy": energy,
-    }
-
-
 def fetch_horoscope_content(sources: list[str]) -> dict[str, Any]:
     resolved_sources = _resolve_horoscope_sources(sources)
     if not resolved_sources:
@@ -1067,43 +1050,36 @@ def fetch_horoscope_content(sources: list[str]) -> dict[str, Any]:
     fallback_used = False
     for sign in SIGNS:
         fallback = SIGN_FALLBACKS[sign]
+        fallback_horoscope = f"{fallback['love']} {fallback['advice']}".strip()
         if not base:
             fallback_used = True
             items[sign] = {
                 "sign": sign,
-                **fallback,
+                "horoscope": fallback_horoscope,
                 "source_names": [],
                 "source_snippets": [],
                 "confidence": 0.2,
                 "fallback_used": True,
                 "tone": SIGN_MOOD_HINTS[sign],
+                "text": fallback_horoscope,
             }
             continue
         try:
             payload = json.loads(_http_get(f"{base.rstrip('/')}/{slug_map[sign]}/"))
             horoscope = str(payload.get("horoscope") or "").strip()
-            sections = _split_horoscope_sections(horoscope)
-            merged = {
-                "love": sections.get("love") or fallback["love"],
-                "work": sections.get("work") or fallback["work"],
-                "money": sections.get("money") or fallback["money"],
-                "energy": sections.get("energy") or fallback["energy"],
-                "friction": fallback["friction"],
-                "advice": fallback["advice"],
-            }
             source_name = urllib.parse.urlparse(base).netloc or base
             if source_name and source_name not in used_sources:
                 used_sources.append(source_name)
             snippet = horoscope[:180]
             items[sign] = {
                 "sign": sign,
-                **merged,
+                "horoscope": horoscope or fallback_horoscope,
                 "source_names": [source_name],
                 "source_snippets": [snippet] if snippet else [],
                 "confidence": 0.8 if horoscope else 0.45,
                 "fallback_used": not bool(horoscope),
                 "tone": SIGN_MOOD_HINTS[sign],
-                "text": horoscope or f"{merged['love']} {merged['work']}",
+                "text": horoscope or fallback_horoscope,
             }
             if not horoscope:
                 fallback_used = True
@@ -1111,13 +1087,13 @@ def fetch_horoscope_content(sources: list[str]) -> dict[str, Any]:
             fallback_used = True
             items[sign] = {
                 "sign": sign,
-                **fallback,
+                "horoscope": fallback_horoscope,
                 "source_names": [],
                 "source_snippets": [],
                 "confidence": 0.3,
                 "fallback_used": True,
                 "tone": SIGN_MOOD_HINTS[sign],
-                "text": f"{fallback['love']} {fallback['work']}",
+                "text": fallback_horoscope,
             }
     return {
         "signs": items,
@@ -1184,15 +1160,16 @@ async def fetch_horoscope_content_async(
     if not base:
         for sign in SIGNS:
             fallback = SIGN_FALLBACKS[sign]
+            fallback_horoscope = f"{fallback['love']} {fallback['advice']}".strip()
             items[sign] = {
                 "sign": sign,
-                **fallback,
+                "horoscope": fallback_horoscope,
                 "source_names": [],
                 "source_snippets": [],
                 "confidence": 0.2,
                 "fallback_used": True,
                 "tone": SIGN_MOOD_HINTS[sign],
-                "text": f"{fallback['love']} {fallback['work']}",
+                "text": fallback_horoscope,
             }
         return {
             "signs": items,
@@ -1228,35 +1205,27 @@ async def fetch_horoscope_content_async(
 
     for sign, payload in results:
         fallback = SIGN_FALLBACKS[sign]
+        fallback_horoscope = f"{fallback['love']} {fallback['advice']}".strip()
         horoscope = str((payload or {}).get("horoscope") or "").strip()
         if not horoscope:
             fallback_used = True
             items[sign] = {
                 "sign": sign,
-                **fallback,
+                "horoscope": fallback_horoscope,
                 "source_names": [],
                 "source_snippets": [],
                 "confidence": 0.3,
                 "fallback_used": True,
                 "tone": SIGN_MOOD_HINTS[sign],
-                "text": f"{fallback['love']} {fallback['work']}",
+                "text": fallback_horoscope,
             }
             continue
-        sections = _split_horoscope_sections(horoscope)
-        merged = {
-            "love": sections.get("love") or fallback["love"],
-            "work": sections.get("work") or fallback["work"],
-            "money": sections.get("money") or fallback["money"],
-            "energy": sections.get("energy") or fallback["energy"],
-            "friction": fallback["friction"],
-            "advice": fallback["advice"],
-        }
         if source_name and source_name not in used_sources:
             used_sources.append(source_name)
         snippet = horoscope[:180]
         items[sign] = {
             "sign": sign,
-            **merged,
+            "horoscope": horoscope,
             "source_names": [source_name],
             "source_snippets": [snippet] if snippet else [],
             "confidence": 0.8,
