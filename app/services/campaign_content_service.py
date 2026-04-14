@@ -883,28 +883,74 @@ class CampaignContentService:
         signs = payload.get("signs")
         if not isinstance(signs, dict):
             return
-        section_fallbacks = {
-            "love": "In amore ascolta di più e fai un passo gentile.",
-            "work": "Sul lavoro punta alle priorità e chiudi una cosa per volta.",
-            "money": "Nei soldi evita gli slanci e tieni d'occhio il budget.",
-            "energy": "Energia buona: dosala senza strafare.",
-            "friction": "Piccoli attriti gestibili con calma e pazienza.",
-            "advice": "Consiglio cricetoso: procedi leggero ma con metodo.",
-        }
+
+        def _hint_bucket(raw: str) -> str:
+            text = str(raw or "").lower()
+            if any(token in text for token in ("alta", "buona", "slancio", "seren", "ok", "focus", "progres")):
+                return "up"
+            if any(token in text for token in ("bassa", "attrit", "fatica", "tension", "rallent", "prudenza", "evita")):
+                return "down"
+            return "flat"
+
+        def _section_fallback(sign: str, section: str, sign_payload: dict[str, Any]) -> str:
+            sign_seed = sum(ord(ch) for ch in sign)
+            markers = " ".join(str(sign_payload.get(key) or "") for key in ("text", "tone", "advice", "friction", "love", "work", "money", "energy"))
+            bucket = _hint_bucket(markers)
+            variants: dict[str, list[str]] = {
+                "love": [
+                    f"In amore {sign} ascolta di più e fai un passo gentile.",
+                    f"In amore {sign} punta su parole semplici e presenza vera.",
+                    f"In amore {sign} evita i teatrini e scegli la chiarezza.",
+                ],
+                "work": [
+                    f"Sul lavoro {sign} punta alle priorità e chiudi una cosa per volta.",
+                    f"Sul lavoro {sign} tiene il ritmo se protegge il focus.",
+                    f"Sul lavoro {sign} rende meglio con agenda corta e concreta.",
+                ],
+                "money": [
+                    f"Nei soldi {sign} evita gli slanci e tiene d'occhio il budget.",
+                    f"Nei soldi {sign} bilancia desideri e conti con più misura.",
+                    f"Nei soldi {sign} fa bene a rinviare le spese impulsive.",
+                ],
+                "energy": [
+                    f"Energia di {sign} buona: dosala senza strafare.",
+                    f"Energia di {sign} a onde: alterna sprint e recupero.",
+                    f"Energia di {sign} concreta: evita il turbo continuo.",
+                ],
+                "friction": [
+                    f"Per {sign} piccoli attriti gestibili con calma e pazienza.",
+                    f"Per {sign} le frizioni calano se abbassa i toni.",
+                    f"Per {sign} meglio evitare risposte a caldo.",
+                ],
+                "advice": [
+                    f"Consiglio cricetoso per {sign}: procedi leggero ma con metodo.",
+                    f"Consiglio cricetoso per {sign}: scegli una micro-vittoria e chiudila.",
+                    f"Consiglio cricetoso per {sign}: meno fretta, più precisione.",
+                ],
+            }
+            pool = variants.get(section, [f"Oggi {sign} tiene ritmo e misura."])
+            idx = sign_seed % len(pool)
+            choice = pool[idx]
+            if bucket == "up" and section in {"love", "work", "energy"}:
+                choice = choice.replace("evita", "modera").replace("a onde", "in crescita")
+            if bucket == "down" and section in {"money", "friction", "advice"}:
+                choice = choice.replace("leggero", "prudente").replace("micro-vittoria", "passo piccolo")
+            return choice
+
         for sign, sign_payload in signs.items():
             if not isinstance(sign_payload, dict):
                 continue
             for section in HOROSCOPE_SECTIONS:
                 text = str(sign_payload.get(section) or "").strip()
                 if force_override:
-                    sign_payload[section] = sanitize_horoscope_text(sign, section_fallbacks.get(section, "Oggi tieni ritmo e misura."))
+                    sign_payload[section] = sanitize_horoscope_text(sign, _section_fallback(sign, section, sign_payload))
                     continue
                 if not text:
                     continue
                 if self._looks_italian_text(text):
                     sign_payload[section] = sanitize_horoscope_text(sign, text)
                     continue
-                sign_payload[section] = sanitize_horoscope_text(sign, section_fallbacks.get(section, "Oggi tieni ritmo e misura."))
+                sign_payload[section] = sanitize_horoscope_text(sign, _section_fallback(sign, section, sign_payload))
 
     @staticmethod
     def _simple_similarity(a: str, b: str) -> float:
