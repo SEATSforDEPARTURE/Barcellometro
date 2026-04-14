@@ -69,6 +69,43 @@ def test_fetch_horoscope_content_async_is_resilient_to_single_sign_failures(monk
     asyncio.run(_run())
 
 
+def test_fetch_horoscope_content_async_uses_trailing_slash_urls(monkeypatch) -> None:
+    requested_urls: list[str] = []
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"horoscope": "Testo prova. Fortuna in arrivo."}
+
+    class _FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, timeout: float):
+            _ = timeout
+            requested_urls.append(url)
+            return _FakeResponse()
+
+    monkeypatch.setattr(fetchers.httpx, "AsyncClient", lambda *args, **kwargs: _FakeAsyncClient(), raising=False)
+    monkeypatch.setattr(
+        "app.services.campaign_content_fetchers._resolve_horoscope_sources",
+        lambda _sources: ["https://ohmanda.com/api/horoscope"],
+    )
+
+    async def _run() -> None:
+        payload = await fetch_horoscope_content_async(["ohmanda"], request_timeout=0.2, max_concurrency=3)
+        assert len(payload["signs"]) == 12
+        assert len(requested_urls) == 12
+        assert all(url.endswith("/") for url in requested_urls)
+
+    asyncio.run(_run())
+
+
 def test_horoscope_embed_metadata_survives_normalize_and_finalize_pipeline() -> None:
     embeds = build_horoscope_embeds({}, _build_horoscope_payload())
     assert len(embeds) >= 2

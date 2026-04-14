@@ -47,7 +47,8 @@ from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
 logger = logging.getLogger(__name__)
-_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 18.0
+_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 3.0
+_HOROSCOPE_EDITORIAL_ENABLED = False
 
 _NEWS_INPUT_META_RE = re.compile(
     r"(?im)\b(?:ecco una possibile versione in italiano|versione in italiano|in breve|riassunto|sintesi)\b[:\-\s]*"
@@ -195,13 +196,19 @@ class CampaignContentService:
             signs_fallback,
             bool(payload.get("fallback_used")),
         )
-        try:
-            used_model = await self._rewrite_horoscope_payload(payload)
-        except Exception as exc:
-            logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
-            used_model = None
+        used_model: str | None = None
+        if _HOROSCOPE_EDITORIAL_ENABLED:
+            try:
+                used_model = await self._rewrite_horoscope_payload(payload)
+            except Exception as exc:
+                logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
+                used_model = None
+        else:
+            self._enforce_horoscope_diversity(payload)
+            logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using original payload")
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
+        logger.info("campaign content: horoscope build complete embeds=%s", len(embeds))
         await self._send_and_store(
             config,
             embeds,
@@ -256,7 +263,24 @@ class CampaignContentService:
         if not isinstance(channel, discord.abc.Messageable):
             return
         page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=payload)
-        message = await channel.send(embed=embeds[0])
+        try:
+            message = await channel.send(embed=embeds[0])
+        except Exception as exc:
+            logger.exception(
+                "campaign content: %s publish failed channel=%s embeds=%s error=%s",
+                service_type.lower(),
+                channel_id,
+                len(embeds),
+                exc.__class__.__name__,
+            )
+            raise
+        logger.info(
+            "campaign content: %s publish success channel=%s message_id=%s embeds=%s",
+            service_type.lower(),
+            channel_id,
+            str(message.id),
+            len(embeds),
+        )
         metadata = {
             "footer_text": footer_text,
             "configured_sources": configured_sources,
@@ -266,15 +290,31 @@ class CampaignContentService:
             "fallback_used": fallback_used,
             "page_map": page_map,
         }
-        await self._database.upsert_campaign_content_message(
-            message_id=str(message.id),
-            guild_id=guild_id,
-            channel_id=channel_id,
-            service_type=service_type,
-            config_id=int(config["id"]),
-            embeds_json=json.dumps([e.to_dict() for e in embeds], ensure_ascii=False),
-            metadata_json=json.dumps(metadata, ensure_ascii=False),
-            current_index=0,
+        try:
+            await self._database.upsert_campaign_content_message(
+                message_id=str(message.id),
+                guild_id=guild_id,
+                channel_id=channel_id,
+                service_type=service_type,
+                config_id=int(config["id"]),
+                embeds_json=json.dumps([e.to_dict() for e in embeds], ensure_ascii=False),
+                metadata_json=json.dumps(metadata, ensure_ascii=False),
+                current_index=0,
+            )
+        except Exception as exc:
+            logger.exception(
+                "campaign content: %s store failed schedule_id=%s pages=%s error=%s",
+                service_type.lower(),
+                str(config.get("id") or ""),
+                len(page_map),
+                exc.__class__.__name__,
+            )
+            raise
+        logger.info(
+            "campaign content: %s store success schedule_id=%s pages=%s",
+            service_type.lower(),
+            str(config.get("id") or ""),
+            len(page_map),
         )
         interval_minutes = int(config.get("interval_minutes") or 0)
         if interval_minutes <= 0:
