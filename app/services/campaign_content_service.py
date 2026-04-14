@@ -1381,7 +1381,7 @@ class CampaignContentService:
 
     def _build_page_map(self, service_type: str, *, payload_embeds: list[Any], payload: dict[str, Any] | None) -> list[dict[str, Any]]:
         if service_type == "NEWS":
-            return build_news_page_map(payload or {})
+            return build_news_page_map(payload or {}, len(payload_embeds))
         if service_type == "WEATHER":
             return build_weather_page_map()
         if service_type == "HOROSCOPE":

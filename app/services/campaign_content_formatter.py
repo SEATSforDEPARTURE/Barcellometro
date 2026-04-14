@@ -304,7 +304,6 @@ _NEWS_BAD_FALLBACKS = {
     "nessun riassunto disponibile.",
 }
 _NEWS_FIELD_HARD_LIMIT = 1024
-_NEWS_MAX_EDITORIAL_CATEGORIES = 3
 _ITALY_TZ = ZoneInfo("Europe/Rome")
 NEWS_EXTRA_ORDER = ["barzelletta", "aforisma", "canzone", "meme"]
 NEWS_EXTRA_FIELD_TITLES = {
@@ -1169,8 +1168,6 @@ def select_final_news_slots(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     "item": selected_item,
                 }
             )
-            if sum(1 for slot in selected_slots if slot.get("slot") == "category") >= _NEWS_MAX_EDITORIAL_CATEGORIES:
-                break
     return selected_slots
 
 
@@ -1312,14 +1309,13 @@ def _first_story_image_url(categories: list[tuple[str, str, str, list[dict[str, 
 def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))
     now_utc = _overview_now(payload)
-    edition_label, daypart = news_edition_label_for_datetime(now_utc)
-    overview = discord.Embed(title=_format_news_title(f"HAMSTER NEWS • {edition_label}"), color=color)
+    _edition_label, daypart = news_edition_label_for_datetime(now_utc)
+    overview = discord.Embed(title=_format_news_title("HAMSTER NEWS • PANORAMICA"), color=color)
     greeting = NEWS_DAYPART_GREETING.get(daypart, NEWS_DAYPART_GREETING["pomeriggio"])
     overview.description = format_standard_description(
         (
             f"**{greeting}**: qui **Barcellometro in regia** 🐹, con la redazione più rumorosa del quartiere. "
-            "**Titoli caldi**, pochi giri di parole e **dritti al punto**. 📰\n"
-            "Che ci racconta il mondo oggi?"
+            "**Titoli caldi**, pochi giri di parole e **dritti al punto**. 📰"
         ),
         blank_line_before_fields=True,
     )
@@ -1364,26 +1360,41 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
             )
             continue
         editorial_categories.append((str(slot.get("category") or ""), display, emoji, item))
-        category_key = str(slot.get("category") or "")
-        overview.add_field(
-            name=format_standard_field_name(f"{display} IN PRIMO PIANO", emoji=emoji),
-            value=_build_single_news_field_value_with_emoji_tracking(
-                item,
-                display=display,
-                used_emojis=used_emojis,
-                seed_key=f"{category_key}:{_news_identity(item)}",
-            ),
-            inline=False,
+
+    detail_title = _format_news_title("HAMSTER NEWS • LE NOTIZIE")
+    secondary_fields: list[tuple[str, str]] = []
+    for category_key, display, emoji, item in editorial_categories:
+        secondary_fields.append(
+            (
+                format_standard_field_name(display, emoji=emoji),
+                _build_single_news_field_value_with_emoji_tracking(
+                    item,
+                    display=display,
+                    used_emojis=used_emojis,
+                    seed_key=f"{category_key}:{_news_identity(item)}",
+                ),
+            )
         )
-    for field_name, field_value in _build_news_extra_fields(config, base_dt=now_utc):
-        overview.add_field(name=field_name, value=field_value, inline=False)
+    secondary_fields.extend(_build_news_extra_fields(config, base_dt=now_utc))
     next_run_field = _next_news_run_field(config, generated_at=now_utc)
     if next_run_field:
-        overview.add_field(
-            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
-            value=next_run_field,
-            inline=False,
-        )
+        secondary_fields.append((format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"), next_run_field))
+
+    embeds: list[discord.Embed] = [overview]
+    detail = discord.Embed(title=detail_title, color=color)
+    detail.description = "Che ci racconta il mondo oggi?"
+    for field_name, field_value in secondary_fields:
+        candidate = discord.Embed.from_dict(detail.to_dict())
+        candidate.add_field(name=field_name, value=field_value, inline=False)
+        if len(candidate.fields) > 25 or len(candidate) > 6000:
+            if detail.fields:
+                embeds.append(detail)
+            detail = discord.Embed(title=detail_title, color=color)
+            detail.description = "Che ci racconta il mondo oggi?"
+            detail.add_field(name=field_name, value=field_value, inline=False)
+            continue
+        detail = candidate
+    embeds.append(detail)
     first_image_url = _first_story_image_url([(cat, d, e, [item]) for cat, d, e, item in editorial_categories])
     if first_image_url is None and latest_item is not None:
         first_image_url = _first_story_image_url([("ultimora", "Ultim'ora", "⚡", [latest_item])])
@@ -1392,13 +1403,23 @@ def build_news_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[d
         service_name="campagne_notizie",
         image_url=first_image_url,
     )
-    return _apply_campaign_footer([overview], service_name="campagne_notizie")
+    return _apply_campaign_footer(embeds, service_name="campagne_notizie")
 
 
-def build_news_page_map(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def build_news_page_map(payload: dict[str, Any], total_pages: int = 1) -> list[dict[str, Any]]:
     _ = payload
-    return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
-
+    safe_total = max(1, int(total_pages or 1))
+    page_map = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    for idx in range(1, safe_total):
+        page_map.append(
+            {
+                "type": "news",
+                "key": f"news_{idx}",
+                "label": f"Notizie · Pagina {idx}",
+                "page": idx,
+            }
+        )
+    return page_map
 
 def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
     color = resolve_color(config.get("embed_color"))

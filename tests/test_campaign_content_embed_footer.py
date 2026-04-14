@@ -76,8 +76,8 @@ def test_news_and_horoscope_embeds_have_shared_footer_without_page_in_title() ->
         {"embed_title": "🔮 OROSCOPO DEL GIORNO"},
         {"generated_at": "2026-04-09T08:30:00+00:00", "signs": {"Ariete": {"text": "Focus"}}},
     )
-    assert "HAMSTER NEWS • EDIZIONE" in _title_inner_without_emoji(news[0].title or "")
-    assert len(news) == 1
+    assert _title_inner_without_emoji(news[0].title or "") == "HAMSTER NEWS • PANORAMICA"
+    assert len(news) == 2
     assert len(horoscope) >= 1
     assert _title_inner_without_emoji(horoscope[0].title or "") == "OROSCOPO CRICETOSO • PANORAMICA"
     news_meta = [get_footer_meta(embed) for embed in news]
@@ -106,7 +106,7 @@ def test_news_overview_has_editorial_tone_without_technical_lines() -> None:
     assert "Notizie uniche aggregate" not in description
     assert "Barcellometro" in description
     assert "redazione" in description.lower()
-    assert "Che ci racconta il mondo oggi?" in description
+    assert "Che ci racconta il mondo oggi?" not in description
     assert "**Barcellometro in regia**" in description
     assert "📰" in description
     assert "📰" in description
@@ -170,15 +170,17 @@ def test_news_category_item_format_matches_single_item_field_format() -> None:
     }
     news = build_news_embeds({}, payload)
     overview = news[0]
-    assert len(overview.fields) >= 3
-    first_field_value = overview.fields[2].value or ""
+    details = news[1]
+    assert len(overview.fields) == 2
+    assert len(details.fields) >= 1
+    first_field_value = details.fields[0].value or ""
     assert any(f"**[Titolo {idx}](https://example.com/{idx})**" in first_field_value for idx in range(2, 8))
     assert "**[Titolo 1](https://example.com/1)**" not in first_field_value
     assert overview.fields[0].name == "⚡ __**ULTIM'ORA**__"
     assert overview.fields[1].name == "🌟 __**IN EVIDENZA**__"
-    assert overview.fields[2].name == "🕵️ __**CRONACA IN PRIMO PIANO**__"
+    assert details.fields[0].name == "🕵️ __**CRONACA**__"
 
-    for idx, field in enumerate(overview.fields):
+    for idx, field in enumerate([*overview.fields, *details.fields]):
         value = field.value or ""
         assert len(value) <= 1024
         assert value.split("\n")[0].startswith("• **")
@@ -203,7 +205,7 @@ def test_news_embed_supports_extras_and_next_edition_for_recurring() -> None:
             "categories": {"cronaca": [{"title": "Titolo 1", "summary": "S1", "source": "ansa.it", "link": "https://example.com/1"}]},
         },
     )
-    field_names = [field.name for field in news[0].fields]
+    field_names = [field.name for field in news[1].fields]
     assert "😂 __**BARZELLETTA DEL GIORNO**__" in field_names
     assert "🧠 __**AFORISMA DEL GIORNO**__" in field_names
     assert "🎵 __**CANZONE DEL GIORNO**__" in field_names
@@ -472,16 +474,21 @@ def test_news_overview_builds_category_fields_buttons_and_no_legacy_sections() -
     }
     news = build_news_embeds({"embed_title": "IGNORED"}, payload)
     overview = news[0]
-    page_map = build_news_page_map(payload)
+    details = news[1]
+    page_map = build_news_page_map(payload, total_pages=len(news))
     overview_field_labels = [field.name for field in overview.fields]
+    details_field_labels = [field.name for field in details.fields]
 
-    assert any("VARIE IN PRIMO PIANO" in name for name in overview_field_labels)
+    assert any("VARIE" in name for name in details_field_labels)
     assert all("TITOLI IN EVIDENZA" not in name for name in overview_field_labels)
 
-    assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    assert page_map == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "news", "key": "news_1", "label": "Notizie · Pagina 1", "page": 1},
+    ]
 
 
-def test_news_overview_selection_uses_configured_order_caps_at_five_categories_and_ten_news() -> None:
+def test_news_overview_selection_uses_configured_order_without_legacy_cap() -> None:
     payload = {
         "configured_categories": [f"cat{i}" for i in range(1, 13)],
         "categories": {
@@ -501,17 +508,21 @@ def test_news_overview_selection_uses_configured_order_caps_at_five_categories_a
     }
     news = build_news_embeds({}, payload)
     overview = news[0]
-    page_map = build_news_page_map(payload)
+    details = news[1]
+    page_map = build_news_page_map(payload, total_pages=len(news))
 
-    assert len(overview.fields) == 5
+    assert len(overview.fields) == 2
     names = [field.name for field in overview.fields]
     assert names[0] == "⚡ __**ULTIM'ORA**__"
     assert names[1] == "🌟 __**IN EVIDENZA**__"
-    assert len(names[2:]) == 3
-    assert all(name.startswith("📌 __**CAT") and name.endswith("IN PRIMO PIANO**__") for name in names[2:])
-    assert len([name for name in names if "IN PRIMO PIANO" in name]) == 3
-    assert all("VARIE" not in name.upper() for name in names)
-    assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    detail_names = [field.name for field in details.fields]
+    assert len(detail_names) >= 10
+    assert all(name.startswith("📌 __**CAT") and name.endswith("**__") for name in detail_names)
+    assert all("VARIE" not in name.upper() for name in detail_names)
+    assert page_map == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "news", "key": "news_1", "label": "Notizie · Pagina 1", "page": 1},
+    ]
 
 
 def test_news_overview_avoids_duplicate_main_story_across_categories_and_handles_empty_categories() -> None:
@@ -531,13 +542,12 @@ def test_news_overview_avoids_duplicate_main_story_across_categories_and_handles
         },
     }
     news = build_news_embeds({}, payload)
-    overview = news[0]
-    values = [field.value for field in overview.fields]
-    names = [field.name for field in overview.fields]
+    values = [field.value for embed in news for field in embed.fields]
+    names = [field.name for embed in news for field in embed.fields]
 
     assert names[0] == "⚡ __**ULTIM'ORA**__"
     assert names[1] == "🌟 __**IN EVIDENZA**__"
-    assert any("IN PRIMO PIANO" in name for name in names)
+    assert any(name.startswith("🕵️ __**CRONACA") or name.startswith("⚽ __**SPORT") for name in names)
     assert any("Titolo condiviso" in value for value in values)
     assert any("Sport esclusivo" in value for value in values)
     assert sum("Titolo condiviso" in value for value in values) == 1
