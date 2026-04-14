@@ -456,10 +456,43 @@ def test_campaign_content_service_maps_editorial_footer_service_names() -> None:
 
 
 def test_campaign_service_resolve_model_uses_task_parameter_for_editorial() -> None:
-    source = Path("app/services/campaign_content_service.py").read_text()
-    assert 'def _resolve_ai_model_name(self, task: str)' in source
-    assert 'self._ai.get_model_config(task)' in source
-    assert 'self._ai.get_model_config("summary")' not in source
+    class _AiStub:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self._models = {
+                "campaign_editorial": "gpt-4.1-mini",
+                "horoscope_editorial": "gpt-4.1-nano",
+            }
+
+        def get_model_config(self, task: str) -> str | None:
+            self.calls.append(task)
+            return self._models.get(task)
+
+        def get_model_display_name(self, task: str) -> str:
+            model = self._models.get(task)
+            return f"openai:{model}" if model else "unknown"
+
+    service = CampaignContentService(database=types.SimpleNamespace(), bot=types.SimpleNamespace(), ai_service=_AiStub())
+
+    editorial_model = service._resolve_ai_model_name("campaign_editorial")
+    horoscope_model = service._resolve_ai_model_name("horoscope_editorial")
+
+    assert editorial_model == "openai:gpt-4.1-mini"
+    assert horoscope_model == "openai:gpt-4.1-nano"
+    assert service._ai.calls == ["campaign_editorial", "horoscope_editorial"]  # type: ignore[union-attr]
+
+
+def test_campaign_service_footer_contributors_include_resolved_model_without_cross_task_override() -> None:
+    service = CampaignContentService(database=types.SimpleNamespace(), bot=types.SimpleNamespace(), ai_service=None)
+    metadata = {
+        "used_sources": ["ansa.it"],
+        "used_model": "openai:gpt-4.1-mini",
+    }
+    contributors = service._campaign_footer_contributors(metadata, service_type="NEWS")
+
+    assert any(token for token in contributors if token != "openai:gpt-4.1-mini")
+    assert "openai:gpt-4.1-mini" in contributors
+    assert "openai:gpt-4.1-nano" not in contributors
 
 
 def test_campaign_formatter_applies_footer_meta_in_all_builders() -> None:
