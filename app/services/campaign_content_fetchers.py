@@ -55,7 +55,7 @@ NEWS_SOURCE_CATALOG = [
     {
         "value": "adnkronos",
         "label": "adnkronos.com",
-        "url": "https://www.adnkronos.com/rss/2.0/Ultimora.xml",
+        "url": "https://rss.adnkronos.com/RSS_Ultimora.xml",
         "aliases": ["adnkronos", "adnkronos.com", "www.adnkronos.com"],
     },
 ]
@@ -250,6 +250,7 @@ LEGACY_NEWS_SOURCE_COMPAT = {
     "ilpost.it": "agi",
     "www.ilpost.it": "agi",
     "https://www.ilpost.it/feed/": "agi",
+    "https://www.adnkronos.com/rss/2.0/ultimora.xml": "adnkronos",
     "fanpage": "adnkronos",
     "fanpage.it": "adnkronos",
     "www.fanpage.it": "adnkronos",
