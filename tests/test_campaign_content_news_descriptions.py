@@ -28,7 +28,7 @@ def _sentence_count(text: str) -> int:
     return len([s for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()])
 
 
-def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -> None:
+def test_news_overview_intro_does_not_start_with_emoji_and_removes_prompt_line() -> None:
     embeds = build_news_embeds(
         {},
         {
@@ -46,7 +46,9 @@ def test_news_overview_intro_does_not_start_with_emoji_and_keeps_prompt_line() -
     assert "**Titoli caldi**" in description
     assert "**dritti al punto**" in description
     assert "📰" in description
-    assert "Che ci racconta il mondo oggi?" in description
+    assert "Che ci racconta il mondo oggi?" not in description
+    assert len(embeds) == 2
+    assert embeds[1].description == "Che ci racconta il mondo oggi?"
 
 
 def test_ultimora_and_in_evidenza_share_summary_pipeline_with_single_sentence_summary() -> None:

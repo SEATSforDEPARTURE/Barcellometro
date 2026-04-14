@@ -109,12 +109,11 @@ def test_build_news_embeds_respects_config_order_and_dedupes() -> None:
     deduped = dedupe_news_items(payload["categories"]["cronaca"] + payload["categories"]["sport"] + payload["categories"]["tecnologia"])
     assert len(deduped) == 2
     embeds = build_news_embeds({"embed_title": "📰 NOTIZIARIO"}, payload)
-    assert len(embeds) == 1
+    assert len(embeds) == 2
     field_names = [field.name for field in embeds[0].fields]
     assert field_names[0] == "⚡ __**ULTIM'ORA**__"
     assert field_names[1] == "🌟 __**IN EVIDENZA**__"
-    assert all("IN PRIMO PIANO" not in name for name in field_names)
-    assert "__**SPORT IN PRIMO PIANO**__" not in " ".join(field_names)
+    assert embeds[1].title == "📰 __**HAMSTER NEWS • LE NOTIZIE**__"
 
 
 def test_news_fallback_summary_uses_single_sentence_without_ai_summary() -> None:
@@ -224,7 +223,7 @@ def test_news_edition_label_switches_by_timeslot() -> None:
     assert night == "EDIZIONE NOTTURNA"
 
 
-def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
+def test_news_editorial_categories_follow_order_without_legacy_cap() -> None:
     payload = {
         "configured_categories": ["economia", "sport", "cronaca", "politica", "tecnologia"],
         "categories": {
@@ -235,10 +234,12 @@ def test_news_editorial_categories_follow_order_and_cap_to_three() -> None:
             "tecnologia": [{"title": "Nuovo software AI per smartphone", "summary": "S", "source": "ansa.it", "link": "https://example.com/5"}],
         },
     }
-    fields = [field.name for field in build_news_embeds({}, payload)[0].fields]
-    editorial = [name for name in fields if "IN PRIMO PIANO" in name]
+    embeds = build_news_embeds({}, payload)
+    editorial = [field.name for field in embeds[1].fields]
     assert len(editorial) == 3
-    assert all("IN PRIMO PIANO" in name for name in editorial)
+    assert "⚽ __**SPORT**__" in editorial
+    assert "🏛️ __**POLITICA**__" in editorial
+    assert "💻 __**TECNOLOGIA**__" in editorial or "💼 __**ECONOMIA**__" in editorial
 
 
 def test_news_embed_has_single_emoji_summary_per_slot() -> None:
@@ -250,8 +251,9 @@ def test_news_embed_has_single_emoji_summary_per_slot() -> None:
             "tecnologia": [{"title": "Attacco informatico a una grande piattaforma", "summary": "Esperti al lavoro per il ripristino.", "source": "wired.it", "link": "https://example.com/t1"}],
         },
     }
-    fields = build_news_embeds({}, payload)[0].fields
-    target_fields = [f for f in fields if "ULTIM'ORA" in f.name or "IN EVIDENZA" in f.name or "IN PRIMO PIANO" in f.name]
+    embeds = build_news_embeds({}, payload)
+    fields = [*embeds[0].fields, *embeds[1].fields]
+    target_fields = [f for f in fields if "ULTIM'ORA" in f.name or "IN EVIDENZA" in f.name or "CRONACA" in f.name or "POLITICA" in f.name or "TECNOLOGIA" in f.name]
     for field in target_fields:
         summary = str(field.value).split("\n")[1].strip()
         assert summary.endswith(("👀", "🤹", "📈", "⚡", "🎭", "😔", "🫥"))
@@ -263,7 +265,8 @@ def test_news_title_has_emoji_outside_markdown() -> None:
         {},
         {"generated_at": "2026-04-09T13:00:00+02:00", "categories": {"cronaca": [{"title": "t", "summary": "s", "source": "ansa", "link": "https://x"}]}},
     )
-    assert news[0].title == "📰 __**HAMSTER NEWS • EDIZIONE POMERIDIANA**__"
+    assert news[0].title == "📰 __**HAMSTER NEWS • PANORAMICA**__"
+    assert news[1].title == "📰 __**HAMSTER NEWS • LE NOTIZIE**__"
 
 
 def test_news_category_slot_is_skipped_when_item_does_not_match_requested_category() -> None:
@@ -307,10 +310,10 @@ def test_news_category_slot_is_skipped_when_item_does_not_match_requested_catego
             ],
         },
     }
-    field_names = [field.name for field in build_news_embeds({}, payload)[0].fields]
-    joined = " ".join(field_names)
-    assert "TECNOLOGIA IN PRIMO PIANO" not in joined
-    assert "POLITICA IN PRIMO PIANO" in joined
+    embeds = build_news_embeds({}, payload)
+    joined = " ".join(field.name for field in embeds[1].fields)
+    assert "TECNOLOGIA" not in joined
+    assert "POLITICA" in joined
 
 
 def test_news_description_uses_natural_greetings_by_daypart() -> None:
@@ -330,7 +333,9 @@ def test_news_description_uses_natural_greetings_by_daypart() -> None:
         assert expected in description
         assert "**Barcellometro in regia**" in description
         assert "📰" in description
-        assert "Che ci racconta il mondo oggi?" in description
+        assert "Che ci racconta il mondo oggi?" not in description
+        assert len(news) == 2
+        assert news[1].description == "Che ci racconta il mondo oggi?"
         assert "Buona pomeriggio" not in description
 
 
@@ -486,7 +491,10 @@ def test_send_and_store_metadata_contains_page_map() -> None:
         )
         metadata = json.loads(db.kwargs["metadata_json"])
         assert "page_map" in metadata
-        assert metadata["page_map"] == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+        assert metadata["page_map"] == [
+            {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+            {"type": "news", "key": "news_1", "label": "Notizie · Pagina 1", "page": 1},
+        ]
         assert channel.last_view is None
 
     asyncio.run(_run())
@@ -842,16 +850,21 @@ def test_load_message_record_handles_invalid_json() -> None:
     asyncio.run(_run())
 
 
-def test_news_page_map_has_only_overview_entry() -> None:
+def test_news_page_map_tracks_overview_and_detail_pages() -> None:
     page_map = build_news_page_map(
         {
             "categories": {
                 "cronaca": [{"title": "a"}],
                 "sport": [{"title": "b"}],
             }
-        }
+        },
+        total_pages=3,
     )
-    assert page_map == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    assert page_map == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "news", "key": "news_1", "label": "Notizie · Pagina 1", "page": 1},
+        {"type": "news", "key": "news_2", "label": "Notizie · Pagina 2", "page": 2},
+    ]
 
 
 def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:

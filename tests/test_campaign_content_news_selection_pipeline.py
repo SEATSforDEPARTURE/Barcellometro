@@ -16,7 +16,7 @@ from app.services.campaign_content_formatter import build_news_embeds, select_fi
 from app.services.campaign_content_service import CampaignContentService
 
 
-def test_selection_pipeline_limits_to_final_slots_for_ai_calls() -> None:
+def test_selection_pipeline_includes_all_secondary_categories_for_ai_calls() -> None:
     class _Ai:
         def __init__(self) -> None:
             self.ask_for_task = AsyncMock(return_value="La notizia aggiorna il quadro corrente. Sintesi finale 👀.")
@@ -50,9 +50,9 @@ def test_selection_pipeline_limits_to_final_slots_for_ai_calls() -> None:
         service = CampaignContentService(database=object(), bot=object(), ai_service=ai)  # type: ignore[arg-type]
         payload = {"configured_categories": list(categories.keys()), "categories": categories}
         selected = select_final_news_slots(payload)
-        assert len(selected) == 5
+        assert len(selected) == 12
         await service._rewrite_news_payload(payload)  # type: ignore[attr-defined]
-        assert ai.ask_for_task.await_count == 5
+        assert ai.ask_for_task.await_count == 12
 
     asyncio.run(_run())
 
