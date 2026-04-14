@@ -232,6 +232,14 @@ def sanitize_horoscope_text(sign: str, text: str) -> str:
         r"(love\s*alert|money\s*vibes|energia\s*del\s*genio|amore|lavoro|soldi|energia|consiglio|friction)\s*[:\-–|]+\s*"
     )
     cleaned = re.sub(heading_pattern, "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf"(?i)^\s*{re.escape(sign)}\b[\s,:;\-–|]*", "", cleaned)
+    cleaned = re.sub(
+        rf"(?i)^(in amore|sul lavoro|nei soldi|energia|attriti|consiglio)\s+{re.escape(sign)}\b[\s,:;\-–|]*",
+        r"\1 ",
+        cleaned,
+    )
+    cleaned = re.sub(rf"(?i)\b{re.escape(sign)}\b(?=[\s,:;\-–|]+(?:oggi|ora|adesso|qui)\b)", "", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
     return cleaned.strip()
 
 

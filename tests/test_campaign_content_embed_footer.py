@@ -361,7 +361,7 @@ def test_horoscope_overview_scores_avoid_trivial_overlap_and_order_bias() -> Non
     assert top_signs.isdisjoint(delicate_signs)
 
 
-def test_horoscope_local_fallback_force_override_keeps_sign_texts_distinct() -> None:
+def test_horoscope_local_fallback_force_override_translates_without_readding_sign_names() -> None:
     service = CampaignContentService(database=types.SimpleNamespace(), bot=types.SimpleNamespace(), ai_service=None)
     payload = {
         "signs": {
@@ -370,11 +370,9 @@ def test_horoscope_local_fallback_force_override_keeps_sign_texts_distinct() -> 
         }
     }
     service._apply_horoscope_italian_fallback(payload, force_override=True)
-    love_values = {payload["signs"][sign]["love"] for sign in payload["signs"]}
-    work_values = {payload["signs"][sign]["work"] for sign in payload["signs"]}
-    assert len(love_values) > 1
-    assert len(work_values) > 1
+    love_values = [payload["signs"][sign]["love"] for sign in payload["signs"]]
     assert all("you are reminded" not in text.lower() for text in love_values)
+    assert all(sign.lower() not in payload["signs"][sign]["love"].lower() for sign in payload["signs"])
 
 
 def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
