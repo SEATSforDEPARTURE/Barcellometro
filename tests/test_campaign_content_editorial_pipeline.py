@@ -805,7 +805,7 @@ def test_horoscope_publish_continues_when_editorial_ai_fails() -> None:
         service = CampaignContentService(database=db, bot=_Bot(), ai_service=_Ai())
         from unittest.mock import patch
 
-        with patch("app.services.campaign_content_service.fetch_horoscope_content", return_value=payload):
+        with patch("app.services.campaign_content_service.fetch_horoscope_content_async", AsyncMock(return_value=payload)):
             await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
 
         metadata = json.loads(db.upsert_campaign_content_message.await_args.kwargs["metadata_json"])
