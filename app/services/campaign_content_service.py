@@ -40,7 +40,7 @@ from app.services.campaign_content_formatter import (
     sanitize_horoscope_text,
 )
 from app.services.database import DatabaseService
-from app.services.footer import FooterService, attach_footer_meta
+from app.services.footer import FooterService, attach_footer_meta, render_footer_text
 from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
 from app.shared.discord.author_pipeline import finalize_embeds_author
@@ -254,7 +254,7 @@ class CampaignContentService:
             contributors=contributors,
             used_local_processing=not contributors,
         )
-        await finalize_embeds(embeds, self._footer, default_service_name=footer_service_name)
+        await self._safe_finalize_campaign_footers(embeds, footer_service_name=footer_service_name)
         embeds = normalize_embeds_for_discord(embeds)
         footer_text = getattr(embeds[0].footer, "text", None) or await self._build_campaign_footer(
             service_name=footer_service_name,
@@ -266,6 +266,8 @@ class CampaignContentService:
         message_batches = split_embeds_for_discord_messages(embeds)
         embeds = [embed for batch in message_batches for embed in batch]
         logger.info("embeds after split=%s", len(embeds))
+        apply_shared_footer_and_pagination(embeds, footer_text)
+        await self._safe_finalize_campaign_footers(embeds, footer_service_name=footer_service_name)
         embeds = await self._reapply_author_after_split(embeds, service_name=footer_service_name)
         message_batches = split_embeds_for_discord_messages(embeds)
         embeds = [embed for batch in message_batches for embed in batch]
@@ -749,7 +751,7 @@ class CampaignContentService:
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
-            self._apply_horoscope_italian_fallback(payload)
+            self._apply_horoscope_local_fallback(payload)
             self._enforce_horoscope_diversity(payload)
             return None
         signs = payload.get("signs", {})
@@ -787,10 +789,14 @@ class CampaignContentService:
         try:
             parsed = json.loads(output or "")
             if not isinstance(parsed, dict):
-                logger.warning("campaign content: horoscope editorial returned non-object json, preserving original payload")
+                logger.warning("campaign content: horoscope editorial returned non-object json, applying local fallback rewrite")
+                self._apply_horoscope_local_fallback(payload)
+                self._enforce_horoscope_diversity(payload)
                 return None
         except json.JSONDecodeError:
-            logger.warning("campaign content: horoscope editorial returned invalid json, preserving original payload")
+            logger.warning("campaign content: horoscope editorial returned invalid json, applying local fallback rewrite")
+            self._apply_horoscope_local_fallback(payload)
+            self._enforce_horoscope_diversity(payload)
             return None
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
@@ -805,6 +811,36 @@ class CampaignContentService:
         self._apply_horoscope_italian_fallback(payload)
         self._enforce_horoscope_diversity(payload)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
+
+    def _fallback_rewrite_horoscope(self, sign: str, section: str, text: str) -> str:
+        english_markers = (" you ", " today ", " are ", " your ", " with ", " and ", " the ")
+        lowered = f" {str(text or '').strip().lower()} "
+        is_english = any(marker in lowered for marker in english_markers)
+        section_fallbacks = {
+            "love": "In amore ascolta di più e segui l’istinto 💖",
+            "work": "Sul lavoro resta concentrato e non distrarti 🧠",
+            "money": "Occhio alle spese impulsive oggi 💸",
+            "energy": "Energia altalenante, prenditi i tuoi tempi ⚡",
+            "friction": "Evita discussioni inutili, non ne vale la pena 😬",
+            "advice": "Fai un passo alla volta, senza correre 🐹",
+        }
+        base = section_fallbacks.get(section, "Tieni il passo con calma oggi 🐹")
+        rewritten = base if is_english else f"{base}"
+        if rewritten.strip() == str(text or "").strip():
+            rewritten = f"{rewritten} {sign}."
+        return sanitize_horoscope_text(sign, rewritten)
+
+    def _apply_horoscope_local_fallback(self, payload: dict[str, Any]) -> None:
+        signs = payload.get("signs")
+        if not isinstance(signs, dict):
+            return
+        for sign in SIGN_ORDER:
+            sign_payload = signs.get(sign)
+            if not isinstance(sign_payload, dict):
+                continue
+            for section in HOROSCOPE_SECTIONS:
+                original = str(sign_payload.get(section) or "")
+                sign_payload[section] = self._fallback_rewrite_horoscope(sign, section, original)
 
     async def _reapply_author_after_split(self, embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
         for embed in embeds:
@@ -1033,19 +1069,42 @@ class CampaignContentService:
         model = (used_model or "").strip()
         if model and model not in contributors:
             contributors.append(model)
-        text, _ = await self._footer.render_footer(
-            service_name=service_name,
-            contributors=contributors,
-            used_local_processing=not contributors,
-        )
-        await self._footer.record_service_footer_profile(
-            service_name=service_name,
-            contributors=contributors,
-            used_local_processing=not contributors,
-            last_rendered_footer=text,
-            origin="runtime",
-        )
-        return text
+        if not hasattr(self._database, "get_setting"):
+            text, _ = render_footer_text(version=None, phrase=None, contributors=contributors)
+            return text
+        try:
+            text, _ = await self._footer.render_footer(
+                service_name=service_name,
+                contributors=contributors,
+                used_local_processing=not contributors,
+            )
+            await self._footer.record_service_footer_profile(
+                service_name=service_name,
+                contributors=contributors,
+                used_local_processing=not contributors,
+                last_rendered_footer=text,
+                origin="runtime",
+            )
+            return text
+        except AttributeError:
+            text, _ = render_footer_text(version=None, phrase=None, contributors=contributors)
+            return text
+
+    async def _safe_finalize_campaign_footers(self, embeds: list[discord.Embed], *, footer_service_name: str) -> None:
+        if not hasattr(self._database, "get_setting"):
+            for embed in embeds:
+                attach_footer_meta(
+                    embed,
+                    service_name=footer_service_name,
+                    contributors=[],
+                    used_local_processing=True,
+                )
+            await finalize_embeds(embeds, None, default_service_name=footer_service_name)
+            return
+        try:
+            await finalize_embeds(embeds, self._footer, default_service_name=footer_service_name)
+        except AttributeError:
+            await finalize_embeds(embeds, None, default_service_name=footer_service_name)
 
     @staticmethod
     def _normalize_sources(sources: list[str]) -> list[str]:

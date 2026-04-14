@@ -370,7 +370,7 @@ def render_author_name_with_page(
         version=version,
     )
     if page_index is not None and page_total is not None and page_total > 1:
-        return _truncate(f"{base}{AUTHOR_SEPARATOR}(Pag. {page_index}/{page_total})")
+        return _truncate(f"{base}{AUTHOR_SEPARATOR}Pagina {page_index}/{page_total}")
     return base
 
 
