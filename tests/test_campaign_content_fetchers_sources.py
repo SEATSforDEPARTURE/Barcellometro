@@ -21,7 +21,7 @@ def test_resolve_news_sources_accepts_display_labels_and_domains() -> None:
 
 
 def test_resolve_news_sources_keeps_explicit_rss_url() -> None:
-    rss = "https://www.adnkronos.com/rss/2.0/Ultimora.xml"
+    rss = "https://rss.adnkronos.com/RSS_Ultimora.xml"
     resolved = _resolve_news_sources([rss])
     assert resolved == [rss]
 
@@ -30,9 +30,13 @@ def test_resolve_news_sources_maps_legacy_tokens_to_supported_sources() -> None:
     resolved = _resolve_news_sources(["ilpost", "fanpage.it"])
     assert resolved == [
         "https://www.agi.it/cronaca/rss",
-        "https://www.adnkronos.com/rss/2.0/Ultimora.xml",
+        "https://rss.adnkronos.com/RSS_Ultimora.xml",
     ]
 
+
+def test_resolve_news_sources_maps_legacy_adnkronos_url_to_supported_source() -> None:
+    resolved = _resolve_news_sources(["https://www.adnkronos.com/rss/2.0/Ultimora.xml"])
+    assert resolved == ["https://rss.adnkronos.com/RSS_Ultimora.xml"]
 
 def test_fetch_news_content_keeps_multiple_selected_categories_ordered(monkeypatch) -> None:
     rss_xml = """
@@ -71,7 +75,7 @@ def test_classify_news_item_maps_viral_world_and_trash_keywords() -> None:
         title="Video su TikTok: utenti e social impazziti per la clip",
         description="Il meme diventa virale sul web.",
         raw_categories=["News"],
-        source="https://www.adnkronos.com/rss/2.0/Ultimora.xml",
+        source="https://rss.adnkronos.com/RSS_Ultimora.xml",
     )
     assert "viral" in viral
 
@@ -79,7 +83,7 @@ def test_classify_news_item_maps_viral_world_and_trash_keywords() -> None:
         title="Reality show tra polemiche e scandalo in diretta tv",
         description="Lite in studio e siparietto social.",
         raw_categories=["Spettacolo"],
-        source="https://www.adnkronos.com/rss/2.0/Ultimora.xml",
+        source="https://rss.adnkronos.com/RSS_Ultimora.xml",
     )
     assert "trash" in trash or "gossip" in trash
 
