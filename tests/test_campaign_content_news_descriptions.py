@@ -48,7 +48,19 @@ def test_news_overview_intro_does_not_start_with_emoji_and_removes_prompt_line()
     assert "📰" in description
     assert "Che ci racconta il mondo oggi?" not in description
     assert len(embeds) == 2
-    assert embeds[1].description == "Che ci racconta il mondo oggi?"
+    assert embeds[1].description == "*Che ci racconta il mondo oggi?*"
+
+
+def test_news_payload_tracks_only_rendered_sources_in_order_without_duplicates() -> None:
+    payload = {
+        "categories": {
+            "cronaca": [{"title": "A", "summary": "S1", "source": "ansa.it", "link": "https://example.com/a"}],
+            "tecnologia": [{"title": "B", "summary": "S2", "source": "wired.it", "link": "https://example.com/b"}],
+            "sport": [{"title": "C", "summary": "S3", "source": "ansa.it", "link": "https://example.com/c"}],
+        }
+    }
+    _ = build_news_embeds({}, payload)
+    assert payload["rendered_sources"] == ["ansa.it", "wired.it"]
 
 
 def test_ultimora_and_in_evidenza_share_summary_pipeline_with_single_sentence_summary() -> None:

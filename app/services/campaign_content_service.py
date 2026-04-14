@@ -256,7 +256,12 @@ class CampaignContentService:
         now = datetime.now(timezone.utc)
         guild_id = str(config["guild_id"])
         channel_id = str(config["channel_id"])
-        footer_sources = self._format_campaign_sources(used_sources or configured_sources, service_type=service_type)
+        effective_used_sources = list(used_sources)
+        if str(service_type or "").upper() == "NEWS" and isinstance(payload, dict):
+            rendered_sources = self._normalize_sources(payload.get("rendered_sources", []))
+            if rendered_sources:
+                effective_used_sources = rendered_sources
+        footer_sources = self._format_campaign_sources(effective_used_sources or configured_sources, service_type=service_type)
         footer_service_name = self._campaign_footer_service_name(service_type)
         contributors = [*footer_sources, *([used_model] if used_model else [])]
         attach_footer_meta_to_all(
@@ -350,7 +355,7 @@ class CampaignContentService:
         metadata = {
             "footer_text": footer_text,
             "configured_sources": configured_sources,
-            "used_sources": used_sources,
+            "used_sources": effective_used_sources,
             "ai_model_used": used_model,
             "used_model": used_model,
             "fallback_used": fallback_used,

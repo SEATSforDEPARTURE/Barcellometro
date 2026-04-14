@@ -142,6 +142,55 @@ def test_campaign_send_and_store_persists_centralized_footer_with_phrase() -> No
     assert metadata_json is not None
 
 
+def test_campaign_news_footer_uses_rendered_sources_from_payload_only() -> None:
+    async def _run() -> tuple[str, str]:
+        db = _FooterDb()
+        footer_service = _build_footer_service(db)
+        await footer_service.set_version('dev7.1')
+        await footer_service.set_global_phrase('In via di sviluppo')
+        channel = _FakeChannel()
+        bot = SimpleNamespace(get_channel=lambda _channel_id: channel)
+        service = CampaignContentService(db, bot)
+        await service._footer.set_version('dev7.1')
+        await service._footer.set_global_phrase('In via di sviluppo')
+        config, _payload = await _build_news_payload()
+        payload = {
+            "categories": {
+                "cronaca": [
+                    {"title": "Titolo A", "summary": "Riassunto A", "source": "ansa.it", "link": "https://example.com/a"}
+                ],
+                "tecnologia": [
+                    {"title": "Titolo B", "summary": "Riassunto B", "source": "wired.it", "link": "https://example.com/b"}
+                ],
+                "politica": [
+                    {"title": "Titolo C", "summary": "Riassunto C", "source": "repubblica.it", "link": "https://example.com/c"}
+                ],
+            }
+        }
+        embeds = build_news_embeds(config, payload)
+
+        await service._send_and_store(
+            config,
+            embeds,
+            'NEWS',
+            configured_sources=['ansa.it', 'repubblica.it', 'wired.it', 'xml2.corriereobjects.it'],
+            used_sources=['ansa.it', 'repubblica.it', 'wired.it', 'xml2.corriereobjects.it'],
+            used_model='llama3.2',
+            fallback_used=False,
+            payload=payload,
+        )
+
+        saved = json.loads(db.saved_messages[0]['embeds_json'])
+        return channel.sent[0].footer.text or "", saved[0]['footer']['text']
+
+    sent_footer, stored_footer = asyncio.run(_run())
+
+    expected = 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con Ansa RSS, Wired RSS, Repubblica RSS e llama3.2'
+    assert sent_footer == expected
+    assert stored_footer == expected
+    assert "Corriere RSS" not in sent_footer
+
+
 def test_footer_finalize_with_contributors_keeps_phrase_and_processing_order() -> None:
     async def _run() -> discord.Embed:
         db = _FooterDb()

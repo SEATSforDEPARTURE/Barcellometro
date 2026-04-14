@@ -410,7 +410,9 @@ def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fiel
     assert '"campagne_meteo"' in source
     assert '"campagne_oroscopo"' in source
     assert '"footer_text": footer_text' in source
-    assert '"used_sources": used_sources' in source
+    assert "effective_used_sources" in source
+    assert 'payload.get("rendered_sources", [])' in source
+    assert '"used_sources": effective_used_sources' in source
     assert '"used_model": used_model' in source
     assert "attach_footer_meta_to_all" in source
 
