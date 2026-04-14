@@ -751,8 +751,6 @@ class CampaignContentService:
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
-            self._apply_horoscope_local_fallback(payload)
-            self._enforce_horoscope_diversity(payload)
             return None
         signs = payload.get("signs", {})
         compact = {
@@ -789,13 +787,13 @@ class CampaignContentService:
         try:
             parsed = json.loads(output or "")
             if not isinstance(parsed, dict):
-                logger.warning("campaign content: horoscope editorial returned non-object json, applying conditional local fallback rewrite")
-                self._apply_horoscope_local_fallback(payload)
+                logger.warning("campaign content: horoscope editorial returned non-object json, applying fallback rewrite to all sections")
+                self._apply_horoscope_italian_fallback(payload, force_override=True)
                 self._enforce_horoscope_diversity(payload)
                 return None
         except json.JSONDecodeError:
-            logger.warning("campaign content: horoscope editorial returned invalid json, applying conditional local fallback rewrite")
-            self._apply_horoscope_local_fallback(payload)
+            logger.warning("campaign content: horoscope editorial returned invalid json, applying fallback rewrite to all sections")
+            self._apply_horoscope_italian_fallback(payload, force_override=True)
             self._enforce_horoscope_diversity(payload)
             return None
         for sign in SIGN_ORDER:
@@ -881,7 +879,7 @@ class CampaignContentService:
             default_service_name=service_name,
         )
 
-    def _apply_horoscope_italian_fallback(self, payload: dict[str, Any]) -> None:
+    def _apply_horoscope_italian_fallback(self, payload: dict[str, Any], *, force_override: bool = False) -> None:
         signs = payload.get("signs")
         if not isinstance(signs, dict):
             return
@@ -898,6 +896,9 @@ class CampaignContentService:
                 continue
             for section in HOROSCOPE_SECTIONS:
                 text = str(sign_payload.get(section) or "").strip()
+                if force_override:
+                    sign_payload[section] = sanitize_horoscope_text(sign, section_fallbacks.get(section, "Oggi tieni ritmo e misura."))
+                    continue
                 if not text:
                     continue
                 if self._looks_italian_text(text):
