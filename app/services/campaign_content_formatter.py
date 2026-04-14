@@ -96,6 +96,8 @@ WEATHER_AREA_LABELS = {
 
 HOROSCOPE_SECTIONS = ["love", "work", "money", "energy", "friction", "advice"]
 WEATHER_AREAS = ["nord", "centro", "sud", "isole"]
+_SOURCE_TECHNICAL_LABELS = {"www", "xml", "xml2", "api", "rss", "feed"}
+_COMMON_TLDS = {"com", "it", "org", "net", "online", "news", "eu", "io", "tv", "co", "uk"}
 
 
 def resolve_color(color_raw: str | None) -> int:
@@ -241,6 +243,39 @@ def sanitize_horoscope_text(sign: str, text: str) -> str:
     cleaned = re.sub(rf"(?i)\b{re.escape(sign)}\b(?=[\s,:;\-–|]+(?:oggi|ora|adesso|qui)\b)", "", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     return cleaned.strip()
+
+
+def extract_main_name(source: str) -> str:
+    token = str(source or "").strip().lower()
+    if not token:
+        return ""
+    parsed = urlparse(token)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        token = parsed.netloc.lower()
+    token = token.split("/", 1)[0].split(":", 1)[0]
+    labels = [part.strip() for part in token.split(".") if part.strip()]
+    filtered = [part for part in labels if part not in _SOURCE_TECHNICAL_LABELS]
+    if len(filtered) > 1 and filtered[-1] in _COMMON_TLDS:
+        filtered = filtered[:-1]
+    candidate = filtered[0] if filtered else (labels[0] if labels else token)
+    if candidate.endswith("objects") and len(candidate) > len("objects"):
+        candidate = candidate[: -len("objects")]
+    return candidate.strip("-_ ")
+
+
+def _title_case_source_name(name: str) -> str:
+    chunks = [part for part in str(name or "").split("-") if part]
+    if not chunks:
+        return ""
+    return "-".join(part[:1].upper() + part[1:].lower() for part in chunks)
+
+
+def format_source_label(source: str, source_type: str) -> str:
+    main_name = extract_main_name(source)
+    if not main_name:
+        return ""
+    kind = "RSS" if str(source_type or "").lower() == "rss" else "API"
+    return f"{_title_case_source_name(main_name)} {kind}"
 
 
 def trim_sentence_block(text: str, *, limit: int = 320) -> str:

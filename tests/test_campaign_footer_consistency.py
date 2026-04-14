@@ -137,8 +137,8 @@ def test_campaign_send_and_store_persists_centralized_footer_with_phrase() -> No
     sent_embed, stored_footer, metadata_json = asyncio.run(_run())
 
     assert sent_embed.footer is not None
-    assert sent_embed.footer.text == 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con ansa'
-    assert stored_footer == 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con ansa'
+    assert sent_embed.footer.text == 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con Ansa RSS'
+    assert stored_footer == 'Barcellometro dev7.1 · In via di sviluppo · Dati elaborati con Ansa RSS'
     assert metadata_json is not None
 
 

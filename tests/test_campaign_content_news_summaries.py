@@ -3,6 +3,7 @@ import re
 from app.services.campaign_content_formatter import (
     _build_news_summary_body,
     _normalize_news_summary_for_embed,
+    format_source_label,
     highlight_key_terms,
 )
 
@@ -59,3 +60,11 @@ def test_highlight_key_terms_does_not_split_key_phrases() -> None:
     text = "Gli Stati Uniti rilanciano il dialogo con l'Iran."
     highlighted = highlight_key_terms(text)
     assert "**Gli Stati** Uniti" not in highlighted
+
+
+def test_campaign_source_labels_include_rss_and_api_markers() -> None:
+    assert format_source_label("ansa.it", "rss") == "Ansa RSS"
+    assert format_source_label("repubblica.it", "rss") == "Repubblica RSS"
+    assert format_source_label("xml2.corriereobjects.it", "rss") == "Corriere RSS"
+    assert format_source_label("open-meteo", "api") == "Open-Meteo API"
+    assert format_source_label("ohmanda", "api") == "Ohmanda API"
