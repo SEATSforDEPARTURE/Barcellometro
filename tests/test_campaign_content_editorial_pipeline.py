@@ -25,6 +25,7 @@ from app.services.campaign_content_formatter import (
     build_horoscope_page_map,
     build_news_embeds,
     build_news_page_map,
+    enforce_embed_size_limit,
     news_edition_label_for_datetime,
     build_weather_embeds,
 )
@@ -518,6 +519,62 @@ def test_send_and_store_persists_normalized_embeds() -> None:
         assert len(persisted) > 1
         for item in persisted:
             assert len(discord.Embed.from_dict(item)) <= DISCORD_MAX_EMBED_TOTAL_CHARS
+
+    asyncio.run(_run())
+
+
+def test_enforce_embed_size_limit_splits_long_payload_into_valid_embeds() -> None:
+    embed = discord.Embed(title="Notizie", color=discord.Color.blue(), description="Intro")
+    for idx in range(1, 10):
+        embed.add_field(name=f"Campo {idx}", value=("Contenuto molto lungo. " * 70).strip(), inline=False)
+    bounded = enforce_embed_size_limit([embed])
+    assert len(bounded) > 1
+    for item in bounded:
+        assert len(item) <= DISCORD_MAX_EMBED_TOTAL_CHARS
+        assert item.title == "Notizie"
+        assert item.color == discord.Color.blue()
+
+
+def test_send_and_store_enforces_embed_upper_bound_after_footer_pipeline() -> None:
+    class _Db:
+        async def upsert_campaign_content_message(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def update_campaign_content_next_run(self, **kwargs):
+            self.next_kwargs = kwargs
+
+    class _Channel(discord.abc.Messageable):
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            return SimpleNamespace(id=987)
+
+    class _Bot:
+        def get_channel(self, _id):
+            return _Channel()
+
+    async def _run() -> None:
+        db = _Db()
+        service = CampaignContentService(database=db, bot=_Bot(), ai_service=None)
+        service._build_campaign_footer = lambda **kwargs: asyncio.sleep(0, result="footer test")
+        config = {"guild_id": "1", "channel_id": "2", "id": 101, "interval_minutes": 60}
+        heavy = discord.Embed(title="x", description="Descrizione")
+        for idx in range(1, 10):
+            heavy.add_field(name=f"Campo {idx}", value=("A" * 900), inline=False)
+        await service._send_and_store(
+            config,
+            [heavy],
+            "NEWS",
+            configured_sources=[],
+            used_sources=[],
+            used_model=None,
+            fallback_used=False,
+            payload={},
+        )
+        persisted = json.loads(db.kwargs["embeds_json"])
+        assert len(persisted) > 1
+        assert all(len(discord.Embed.from_dict(item)) <= DISCORD_MAX_EMBED_TOTAL_CHARS for item in persisted)
 
     asyncio.run(_run())
 

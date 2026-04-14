@@ -12,6 +12,10 @@ import discord
 from app.services.author import attach_author_meta_to_all
 from app.services.embed_images import attach_embed_images_meta
 from app.services.footer import attach_footer_meta_to_all
+from app.shared.discord.embed_limits import (
+    DISCORD_MAX_EMBED_TOTAL_CHARS,
+    split_markdown_lines_into_field_values,
+)
 from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 
 DEFAULT_COLOR = 0x2F3136
@@ -118,6 +122,69 @@ def apply_shared_footer_and_pagination(embeds: list[discord.Embed], footer_text:
     for idx, embed in enumerate(embeds, start=1):
         _with_footer(embed, idx, total)
     return embeds
+
+
+def _clone_embed_without_fields(embed: discord.Embed, *, include_description: bool) -> discord.Embed:
+    payload = embed.to_dict()
+    payload.pop("fields", None)
+    if not include_description:
+        payload.pop("description", None)
+    return discord.Embed.from_dict(payload)
+
+
+def _split_field_value_to_fit_budget(value: str, *, budget: int) -> list[str]:
+    hard_limit = max(1, min(1024, budget))
+    return split_markdown_lines_into_field_values(
+        str(value or "").splitlines() or [str(value or "")],
+        limit=hard_limit,
+        continuation_prefix="",
+    )
+
+
+def enforce_embed_size_limit(embeds: list[discord.Embed]) -> list[discord.Embed]:
+    bounded: list[discord.Embed] = []
+    for embed_index, embed in enumerate(embeds):
+        if len(embed) <= DISCORD_MAX_EMBED_TOTAL_CHARS:
+            bounded.append(embed)
+            continue
+
+        logger.debug(
+            "campaign content: enforce_embed_size_limit split start embed_index=%s size=%s fields=%s",
+            embed_index,
+            len(embed),
+            len(embed.fields),
+        )
+        current = _clone_embed_without_fields(embed, include_description=True)
+        if len(current) > DISCORD_MAX_EMBED_TOTAL_CHARS and current.description:
+            without_description = _clone_embed_without_fields(embed, include_description=False)
+            current.description = (current.description or "")[: max(1, DISCORD_MAX_EMBED_TOTAL_CHARS - len(without_description))]
+        has_content = bool(current.description)
+
+        for raw_field in embed.fields:
+            base_name = str(raw_field.name or "—")
+            raw_chunks = _split_field_value_to_fit_budget(str(raw_field.value or "—"), budget=1024)
+            for chunk_index, raw_chunk in enumerate(raw_chunks):
+                field_name = base_name if chunk_index == 0 else f"{base_name} (cont.)"
+                pending_chunks = [raw_chunk or "—"]
+                while pending_chunks:
+                    field_value = pending_chunks.pop(0)
+                    projected_size = len(current) + len(field_name) + len(field_value)
+                    if len(current.fields) >= 25 or projected_size > DISCORD_MAX_EMBED_TOTAL_CHARS:
+                        if has_content:
+                            bounded.append(current)
+                        current = _clone_embed_without_fields(embed, include_description=False)
+                        has_content = False
+                        available_budget = max(1, DISCORD_MAX_EMBED_TOTAL_CHARS - len(current) - len(field_name))
+                        split_chunks = _split_field_value_to_fit_budget(field_value, budget=available_budget)
+                        pending_chunks = split_chunks + pending_chunks
+                        continue
+                    current.add_field(name=field_name, value=field_value, inline=raw_field.inline)
+                    has_content = True
+
+        if has_content:
+            bounded.append(current)
+
+    return bounded
 
 
 def _apply_campaign_footer(embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
