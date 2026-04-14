@@ -1343,6 +1343,60 @@ def test_horoscope_rewrite_preserves_provider_differences_between_signs() -> Non
     asyncio.run(_run())
 
 
+def test_horoscope_rewrite_partial_provider_failures_use_differentiated_fallbacks() -> None:
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *args, **kwargs):
+            return "not-json"
+
+    async def _run() -> None:
+        payload = {
+            "signs": {
+                "Ariete": {
+                    "love": "Aries love: direct chat helps rebuild trust.",
+                    "work": "Aries work: close the bugfix before noon.",
+                    "money": "Aries money: postpone gadget spending.",
+                    "energy": "Aries energy: intense morning, slow evening.",
+                    "friction": "Aries friction: avoid reacting to criticism.",
+                    "advice": "Aries advice: focus on one practical goal.",
+                    "fallback_used": False,
+                },
+                "Toro": {
+                    "love": "",
+                    "work": "",
+                    "money": "",
+                    "energy": "",
+                    "friction": "",
+                    "advice": "",
+                    "fallback_used": True,
+                },
+                "Gemelli": {
+                    "love": "",
+                    "work": "",
+                    "money": "",
+                    "energy": "",
+                    "friction": "",
+                    "advice": "",
+                    "fallback_used": True,
+                },
+            }
+        }
+        for missing_sign in [sign for sign in SIGN_ORDER if sign not in payload["signs"]]:
+            payload["signs"][missing_sign] = dict(payload["signs"]["Toro"])
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
+        await service._rewrite_horoscope_payload(payload)
+        toro_summary = " ".join(payload["signs"]["Toro"][section] for section in ["love", "work", "money", "energy"])
+        gemelli_summary = " ".join(payload["signs"]["Gemelli"][section] for section in ["love", "work", "money", "energy"])
+        assert toro_summary != gemelli_summary
+        assert "toro" not in payload["signs"]["Toro"]["love"].lower()
+        assert "gemelli" not in payload["signs"]["Gemelli"]["love"].lower()
+        assert all(token not in payload["signs"]["Toro"]["love"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
+
+    asyncio.run(_run())
+
+
 def test_weather_service_still_uses_editorial_ai_when_enabled() -> None:
     class _Channel(discord.abc.Messageable):
         async def _get_channel(self):
