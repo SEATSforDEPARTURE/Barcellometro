@@ -325,11 +325,27 @@ def estimate_embed_total_size(embed: discord.Embed) -> int:
 
 
 def _estimate_embed_size(embed: discord.Embed) -> int:
-    return estimate_embed_total_size(embed)
+    return compute_embed_text_size(embed)
+
+
+def compute_embed_text_size(embed: discord.Embed) -> int:
+    total = 0
+    total += len(embed.title or "")
+    total += len(embed.description or "")
+    total += len(embed.footer.text or "") if embed.footer else 0
+    total += len(embed.author.name or "") if embed.author else 0
+    for field in embed.fields:
+        total += len(field.name or "")
+        total += len(field.value or "")
+    return total
+
+
+def compute_embeds_message_text_size(embeds: list[discord.Embed]) -> int:
+    return sum(compute_embed_text_size(embed) for embed in embeds)
 
 
 def estimate_embeds_total_size(embeds: list[discord.Embed]) -> int:
-    return sum(_estimate_embed_size(embed) for embed in embeds)
+    return compute_embeds_message_text_size(embeds)
 
 
 def is_valid_embed(
@@ -518,4 +534,52 @@ def chunk_embeds_for_message_batches(
         current_total += embed_size
     if current:
         batches.append(current)
+    return batches
+
+
+def split_embeds_for_discord_messages(embeds: list[discord.Embed]) -> list[list[discord.Embed]]:
+    normalized_embeds: list[discord.Embed] = []
+    for embed in embeds:
+        preserve_rendered_footer = bool(getattr(embed.footer, "text", None))
+        normalized_embeds.extend(
+            _normalize_single_embed(
+                embed,
+                max_chars=DISCORD_MAX_EMBED_TOTAL_CHARS,
+                preserve_rendered_footer=preserve_rendered_footer,
+            )
+        )
+
+    validated_embeds: list[discord.Embed] = []
+    for embed in normalized_embeds:
+        if is_valid_embed(embed, max_chars=DISCORD_MAX_EMBED_TOTAL_CHARS):
+            validated_embeds.append(embed)
+            continue
+        validated_embeds.extend(
+            _normalize_single_embed(
+                embed,
+                max_chars=DISCORD_MAX_EMBED_TOTAL_CHARS,
+                preserve_rendered_footer=True,
+            )
+        )
+
+    batches: list[list[discord.Embed]] = []
+    current_batch: list[discord.Embed] = []
+    current_total = 0
+    for embed in validated_embeds:
+        embed_size = compute_embed_text_size(embed)
+        if embed_size > DISCORD_MAX_EMBED_TOTAL_CHARS:
+            logger.warning("embed_limits: dropping invalid embed size=%s fields=%s", embed_size, len(embed.fields))
+            continue
+        should_flush = bool(current_batch) and (
+            len(current_batch) >= DISCORD_MAX_EMBEDS_PER_MESSAGE
+            or current_total + embed_size > DISCORD_MAX_EMBED_TOTAL_CHARS
+        )
+        if should_flush:
+            batches.append(current_batch)
+            current_batch = []
+            current_total = 0
+        current_batch.append(embed)
+        current_total += embed_size
+    if current_batch:
+        batches.append(current_batch)
     return batches

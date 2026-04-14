@@ -31,7 +31,13 @@ from app.services.campaign_content_formatter import (
 )
 from app.services.campaign_content_service import CampaignContentService
 from app.services.database import DatabaseService
-from app.shared.discord.embed_limits import DISCORD_MAX_EMBED_TOTAL_CHARS, is_valid_embed
+from app.shared.discord.embed_limits import (
+    DISCORD_MAX_EMBED_TOTAL_CHARS,
+    compute_embed_text_size,
+    compute_embeds_message_text_size,
+    is_valid_embed,
+    split_embeds_for_discord_messages,
+)
 
 
 def _normalize_standardized_title(title: str | None) -> str:
@@ -535,6 +541,33 @@ def test_enforce_embed_size_limit_splits_long_payload_into_valid_embeds() -> Non
         assert item.color == discord.Color.blue()
 
 
+def test_compute_embed_text_size_counts_relevant_fields() -> None:
+    embed = discord.Embed(title="Titolo", description="Descrizione")
+    embed.set_footer(text="Footer")
+    embed.set_author(name="Author")
+    embed.add_field(name="Campo", value="Valore", inline=False)
+    expected = len("Titolo") + len("Descrizione") + len("Footer") + len("Author") + len("Campo") + len("Valore")
+    assert compute_embed_text_size(embed) == expected
+
+
+def test_compute_embeds_message_text_size_sums_embeds() -> None:
+    embed_a = discord.Embed(title="A")
+    embed_b = discord.Embed(description="BBBB")
+    assert compute_embeds_message_text_size([embed_a, embed_b]) == 5
+
+
+def test_split_embeds_for_discord_messages_splits_on_aggregate_message_limit() -> None:
+    embed_a = discord.Embed(title="A")
+    embed_b = discord.Embed(title="B")
+    for idx in range(3):
+        embed_a.add_field(name=f"A{idx}", value="x" * 1000, inline=False)
+        embed_b.add_field(name=f"B{idx}", value="y" * 1000, inline=False)
+    batches = split_embeds_for_discord_messages([embed_a, embed_b])
+    assert len(batches) == 2
+    assert all(len(batch) == 1 for batch in batches)
+    assert all(compute_embeds_message_text_size(batch) <= DISCORD_MAX_EMBED_TOTAL_CHARS for batch in batches)
+
+
 def test_send_and_store_enforces_embed_upper_bound_after_footer_pipeline() -> None:
     class _Db:
         async def upsert_campaign_content_message(self, **kwargs):
@@ -575,6 +608,61 @@ def test_send_and_store_enforces_embed_upper_bound_after_footer_pipeline() -> No
         persisted = json.loads(db.kwargs["embeds_json"])
         assert len(persisted) > 1
         assert all(len(discord.Embed.from_dict(item)) <= DISCORD_MAX_EMBED_TOTAL_CHARS for item in persisted)
+
+    asyncio.run(_run())
+
+
+def test_send_and_store_splits_publish_into_multiple_messages_when_batch_is_too_large() -> None:
+    class _Db:
+        async def upsert_campaign_content_message(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def update_campaign_content_next_run(self, **kwargs):
+            self.next_kwargs = kwargs
+
+    class _Channel(discord.abc.Messageable):
+        def __init__(self) -> None:
+            self.send = AsyncMock(side_effect=[SimpleNamespace(id=1001), SimpleNamespace(id=1002)])
+
+        async def _get_channel(self):
+            return self
+
+    class _Bot:
+        def __init__(self) -> None:
+            self.channel = _Channel()
+
+        def get_channel(self, _id):
+            return self.channel
+
+    async def _run() -> None:
+        db = _Db()
+        bot = _Bot()
+        service = CampaignContentService(database=db, bot=bot, ai_service=None)
+        service._build_campaign_footer = lambda **kwargs: asyncio.sleep(0, result="footer test")
+        config = {"guild_id": "1", "channel_id": "2", "id": 102, "interval_minutes": 60}
+        embed_a = discord.Embed(title="A")
+        embed_b = discord.Embed(title="B")
+        for idx in range(3):
+            embed_a.add_field(name=f"A{idx}", value="x" * 1000, inline=False)
+            embed_b.add_field(name=f"B{idx}", value="y" * 1000, inline=False)
+        await service._send_and_store(
+            config,
+            [embed_a, embed_b],
+            "HOROSCOPE",
+            configured_sources=[],
+            used_sources=[],
+            used_model=None,
+            fallback_used=False,
+            payload={},
+        )
+        assert bot.channel.send.await_count == 2
+        first_send_kwargs = bot.channel.send.await_args_list[0].kwargs
+        second_send_kwargs = bot.channel.send.await_args_list[1].kwargs
+        assert len(first_send_kwargs["embeds"]) == 1
+        assert len(second_send_kwargs["embeds"]) == 1
+        metadata = json.loads(db.kwargs["metadata_json"])
+        assert metadata["message_ids"] == ["1001", "1002"]
+        assert len(metadata["message_batches"]) == 2
 
     asyncio.run(_run())
 

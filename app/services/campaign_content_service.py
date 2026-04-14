@@ -43,7 +43,12 @@ from app.services.database import DatabaseService
 from app.services.footer import FooterService, attach_footer_meta
 from app.services.footer import attach_footer_meta_to_all
 from app.services.discord_embed_utils import hydrate_persisted_embed_with_footer
-from app.shared.discord.embed_limits import normalize_embeds_for_discord
+from app.shared.discord.embed_limits import (
+    compute_embed_text_size,
+    compute_embeds_message_text_size,
+    normalize_embeds_for_discord,
+    split_embeds_for_discord_messages,
+)
 from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
@@ -255,11 +260,32 @@ class CampaignContentService:
         )
         apply_shared_footer_and_pagination(embeds, footer_text)
         embeds = enforce_embed_size_limit(embeds)
+        message_batches = split_embeds_for_discord_messages(embeds)
+        embeds = [embed for batch in message_batches for embed in batch]
+        if not embeds:
+            logger.warning("campaign content: %s publish aborted channel=%s reason=no_valid_embeds", service_type.lower(), channel_id)
+            return
         logger.debug(
             "campaign content: %s embed sizes after enforcement=%s",
             service_type.lower(),
-            [len(embed) for embed in embeds],
+            [compute_embed_text_size(embed) for embed in embeds],
         )
+        for embed_index, embed in enumerate(embeds):
+            logger.info(
+                "embed_size_check service=%s embed_index=%s size=%s fields=%s",
+                service_type.lower(),
+                embed_index,
+                compute_embed_text_size(embed),
+                len(embed.fields),
+            )
+        for batch_index, batch in enumerate(message_batches):
+            logger.info(
+                "embed_batch_check service=%s batch_index=%s embeds=%s total_size=%s",
+                service_type.lower(),
+                batch_index,
+                len(batch),
+                compute_embeds_message_text_size(batch),
+            )
         channel = self._bot.get_channel(int(channel_id))
         if channel is None:
             try:
@@ -272,27 +298,33 @@ class CampaignContentService:
         page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=payload)
         embeds_to_send = len(embeds)
         logger.info(
-            "campaign content: %s publish start channel=%s embeds_to_send=%s",
+            "campaign content: %s publish start channel=%s batches=%s embeds_total=%s",
             service_type.lower(),
             channel_id,
+            len(message_batches),
             embeds_to_send,
         )
         try:
-            message = await channel.send(embeds=embeds)
+            sent_messages: list[Any] = []
+            for batch in message_batches:
+                sent_messages.append(await channel.send(embeds=batch))
         except Exception as exc:
             logger.exception(
-                "campaign content: %s publish failed channel=%s embeds=%s error=%s",
+                "campaign content: %s publish failed channel=%s batches=%s embeds_total=%s error=%s",
                 service_type.lower(),
                 channel_id,
+                len(message_batches),
                 len(embeds),
                 exc.__class__.__name__,
             )
             raise
+        message = sent_messages[0]
         logger.info(
-            "campaign content: %s publish success channel=%s message_id=%s embeds=%s",
+            "campaign content: %s publish success channel=%s first_message_id=%s batches=%s embeds_total=%s",
             service_type.lower(),
             channel_id,
             str(message.id),
+            len(message_batches),
             len(embeds),
         )
         metadata = {
@@ -303,6 +335,9 @@ class CampaignContentService:
             "used_model": used_model,
             "fallback_used": fallback_used,
             "page_map": page_map,
+            "message_batches": [[embed.to_dict() for embed in batch] for batch in message_batches],
+            "message_batch_sizes": [compute_embeds_message_text_size(batch) for batch in message_batches],
+            "message_ids": [str(getattr(msg, "id", "")) for msg in sent_messages],
         }
         try:
             await self._database.upsert_campaign_content_message(
