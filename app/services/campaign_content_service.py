@@ -816,9 +816,9 @@ class CampaignContentService:
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
             return None
+        used_model = self._resolve_ai_model_name("campaign_editorial")
         signs = payload.get("signs", {})
         compact = {sign: {"horoscope": str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
-        ai_applied = False
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             if not isinstance(sign_payload, dict):
@@ -854,14 +854,13 @@ class CampaignContentService:
                     rewritten = self._postprocess_horoscope_text(sign, cleaned_candidate)
             if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
                 sign_payload["horoscope"] = rewritten
-                ai_applied = True
                 logger.info("horoscope rewrite done sign=%s ai=true", sign)
                 continue
             sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=True)
             logger.info("horoscope rewrite fallback sign=%s reason=ai_unusable", sign)
 
         self._enforce_horoscope_diversity(payload, original_signs=compact)
-        return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
+        return used_model
 
     @staticmethod
     def _looks_non_italian_or_mixed(text: str) -> bool:
@@ -955,11 +954,11 @@ class CampaignContentService:
     def _build_horoscope_sign_prompt(horoscope: str) -> str:
         return (
             "Riscrivi questo oroscopo in italiano naturale.\n"
-            "Massimo 2 frasi, tono simpatico, leggero e cricetoso.\n"
+            "Massimo 2 frasi.\n"
+            "Tono simpatico, leggero e cricetoso.\n"
             "Niente frasi meta come 'ecco la traduzione' o 'versione italiana'.\n"
             "Niente inglese.\n"
-            "Una sola emoji alla fine.\n"
-            "Metti in **grassetto** solo le parole importanti.\n\n"
+            "\n"
             "Testo:\n"
             f"{horoscope}"
         )
