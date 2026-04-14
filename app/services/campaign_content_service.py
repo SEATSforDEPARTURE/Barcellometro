@@ -789,12 +789,12 @@ class CampaignContentService:
         try:
             parsed = json.loads(output or "")
             if not isinstance(parsed, dict):
-                logger.warning("campaign content: horoscope editorial returned non-object json, applying local fallback rewrite")
+                logger.warning("campaign content: horoscope editorial returned non-object json, applying conditional local fallback rewrite")
                 self._apply_horoscope_local_fallback(payload)
                 self._enforce_horoscope_diversity(payload)
                 return None
         except json.JSONDecodeError:
-            logger.warning("campaign content: horoscope editorial returned invalid json, applying local fallback rewrite")
+            logger.warning("campaign content: horoscope editorial returned invalid json, applying conditional local fallback rewrite")
             self._apply_horoscope_local_fallback(payload)
             self._enforce_horoscope_diversity(payload)
             return None
@@ -812,23 +812,53 @@ class CampaignContentService:
         self._enforce_horoscope_diversity(payload)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
 
+    @staticmethod
+    def _should_italianize_horoscope_text(text: str) -> bool:
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return False
+        lowered = f" {cleaned.lower()} "
+        forced_markers = (
+            " you ",
+            " your ",
+            " today ",
+            " stay calm ",
+            " reminded ",
+            " focus on ",
+            " take a ",
+            " listen to ",
+        )
+        if any(marker in lowered for marker in forced_markers):
+            return True
+        tokens = re.findall(r"[a-zàèéìòù']+", cleaned.lower())
+        if not tokens:
+            return False
+        italian_tokens = {
+            "amore", "lavoro", "soldi", "spese", "energia", "discussioni", "tensioni",
+            "oggi", "consiglio", "con", "per", "una", "uno", "il", "la", "che", "non", "nel", "sul",
+        }
+        english_tokens = {
+            "you", "your", "today", "stay", "calm", "reminded", "focus", "take", "listen",
+            "work", "love", "money", "energy", "friction", "advice", "and", "the", "with", "on",
+            "be", "is", "are", "keep", "careful",
+        }
+        it_hits = sum(1 for token in tokens if token in italian_tokens)
+        en_hits = sum(1 for token in tokens if token in english_tokens)
+        return en_hits >= 2 and it_hits == 0
+
     def _fallback_rewrite_horoscope(self, sign: str, section: str, text: str) -> str:
-        english_markers = (" you ", " today ", " are ", " your ", " with ", " and ", " the ")
-        lowered = f" {str(text or '').strip().lower()} "
-        is_english = any(marker in lowered for marker in english_markers)
+        if not self._should_italianize_horoscope_text(text):
+            return sanitize_horoscope_text(sign, str(text or ""))
         section_fallbacks = {
             "love": "In amore ascolta di più e segui l’istinto 💖",
             "work": "Sul lavoro resta concentrato e non distrarti 🧠",
-            "money": "Occhio alle spese impulsive oggi 💸",
-            "energy": "Energia altalenante, prenditi i tuoi tempi ⚡",
-            "friction": "Evita discussioni inutili, non ne vale la pena 😬",
-            "advice": "Fai un passo alla volta, senza correre 🐹",
+            "money": "Occhio a soldi e spese impulsive oggi 💸",
+            "energy": "L'energia è altalenante: dosala con calma ⚡",
+            "friction": "Evita discussioni e tensioni inutili 😬",
+            "advice": "Consiglio: fai un passo alla volta, senza correre 🐹",
         }
-        base = section_fallbacks.get(section, "Tieni il passo con calma oggi 🐹")
-        rewritten = base if is_english else f"{base}"
-        if rewritten.strip() == str(text or "").strip():
-            rewritten = f"{rewritten} {sign}."
-        return sanitize_horoscope_text(sign, rewritten)
+        base = section_fallbacks.get(section, "Consiglio: tieni il passo con calma oggi 🐹")
+        return sanitize_horoscope_text(sign, base)
 
     def _apply_horoscope_local_fallback(self, payload: dict[str, Any]) -> None:
         signs = payload.get("signs")
