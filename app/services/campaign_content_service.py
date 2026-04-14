@@ -817,6 +817,12 @@ class CampaignContentService:
         if self._ai is None or not self._ai.is_enabled():
             return None
         used_model: str | None = None
+        model_name: str | None = None
+        get_model_cfg = getattr(self._ai, "get_model_config", None)
+        if callable(get_model_cfg):
+            configured_model = get_model_cfg("campaign_editorial")
+            if isinstance(configured_model, str) and configured_model.strip():
+                model_name = configured_model
         signs = payload.get("signs", {})
         compact = {sign: {"horoscope": str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
         for sign in SIGN_ORDER:
@@ -846,6 +852,13 @@ class CampaignContentService:
 
             rewritten = ""
             if isinstance(candidate, str) and candidate.strip():
+                parsed_candidate = None
+                try:
+                    parsed_candidate = json.loads(candidate)
+                except Exception:
+                    parsed_candidate = None
+                if parsed_candidate is not None and model_name:
+                    used_model = used_model or model_name
                 cleaned_candidate = self._sanitize_editorial_text(candidate)
                 acceptable, reason = self._is_horoscope_output_acceptable(cleaned_candidate)
                 if not acceptable:
@@ -854,12 +867,8 @@ class CampaignContentService:
                     rewritten = self._postprocess_horoscope_text(sign, cleaned_candidate)
             if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
                 sign_payload["horoscope"] = rewritten
-                if used_model is None:
-                    get_model_cfg = getattr(self._ai, "get_model_config", None)
-                    if callable(get_model_cfg):
-                        configured_model = get_model_cfg("campaign_editorial")
-                        if isinstance(configured_model, str) and configured_model.strip():
-                            used_model = configured_model
+                if model_name:
+                    used_model = used_model or model_name
                 logger.info("horoscope rewrite done sign=%s ai=true", sign)
                 continue
             sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=True)
