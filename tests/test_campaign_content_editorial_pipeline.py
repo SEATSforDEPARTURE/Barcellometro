@@ -768,7 +768,8 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
             local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(local_payload)
-        assert local_payload["signs"]["Ariete"]["love"] == "orig"
+        assert local_payload["signs"]["Ariete"]["love"] != "orig"
+        assert "amore" in local_payload["signs"]["Ariete"]["love"].lower()
 
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
@@ -871,7 +872,8 @@ def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
             local_payload["signs"][s] = {"sign": s, "love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=ai)
         await service._rewrite_horoscope_payload(local_payload)
-        assert local_payload["signs"]["Ariete"]["love"] == "orig"
+        assert local_payload["signs"]["Ariete"]["love"] != "orig"
+        assert "amore" in local_payload["signs"]["Ariete"]["love"].lower()
 
     asyncio.run(_run_valid())
     asyncio.run(_run_invalid())
@@ -1083,7 +1085,7 @@ def test_send_and_store_reapplies_author_pagination_and_identical_footer_after_s
         footer = flattened[0].footer.text
         for idx, embed in enumerate(flattened, start=1):
             assert embed.footer.text == footer
-            assert embed.author.name.endswith(f"Pagina {idx}/{expected_total}")
+            assert embed.author.name.endswith(f"(Pag. {idx}/{expected_total})")
         persisted = [discord.Embed.from_dict(item) for item in json.loads(db.kwargs["embeds_json"])]
         assert all((item.footer.text or "") == footer for item in persisted)
 
