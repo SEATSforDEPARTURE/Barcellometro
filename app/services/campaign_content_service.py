@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -56,7 +55,7 @@ from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
 logger = logging.getLogger(__name__)
-_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 3.0
+_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 90.0
 _HOROSCOPE_EDITORIAL_ENABLED = True
 
 _NEWS_INPUT_META_RE = re.compile(
@@ -94,7 +93,7 @@ _NEWS_EXTRA_ITALIAN_FALLBACKS = {
 _HOROSCOPE_ENGLISH_MARKERS = {
     "you", "your", "today", "darling", "moon", "jupiter", "venus", "mercury", "uranus",
     "brainstorming", "blessings", "channel", "unexpected", "sessions", "reflected",
-    "indicate", "boost", "work", "love", "money", "energy", "friction", "advice",
+    "indicate", "boost", "trust", "focus", "career", "romance", "advice",
 }
 _HOROSCOPE_ITALIAN_STRUCTURAL_MARKERS = {
     "oggi", "con", "per", "non", "una", "uno", "del", "della", "delle", "sul", "nel", "tra",
@@ -769,90 +768,44 @@ class CampaignContentService:
         if self._ai is None or not self._ai.is_enabled():
             return None
         signs = payload.get("signs", {})
-        compact = {sign: {section: str(sign_payload.get(section) or "") for section in HOROSCOPE_SECTIONS} for sign, sign_payload in signs.items()}
-        original_compact = {sign: {section: str(sections.get(section) or "") for section in HOROSCOPE_SECTIONS} for sign, sections in compact.items()}
-        provider_backed_signs = {
-            sign
-            for sign in SIGN_ORDER
-            if isinstance(signs.get(sign), dict)
-            and not bool(signs.get(sign, {}).get("fallback_used"))
-            and any(str(original_compact.get(sign, {}).get(section) or "").strip() for section in HOROSCOPE_SECTIONS)
-        }
-        fallback_only_signs = [sign for sign in SIGN_ORDER if sign not in provider_backed_signs]
-        logger.info(
-            "horoscope rewrite provider_backed_signs=%s fallback_only_signs=%s",
-            len(provider_backed_signs),
-            len(fallback_only_signs),
-        )
+        compact = {sign: {"horoscope": str(sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
         ai_applied = False
-        ai_sections_accepted = 0
-        ai_sections_rejected = 0
-        forced_italianization = 0
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
-            provider_available = sign in provider_backed_signs
-            for key in HOROSCOPE_SECTIONS:
-                provider_text = str(original_compact.get(sign, {}).get(key) or "")
-                if not provider_available:
-                    sign_payload[key] = self._rewrite_section_to_safe_italian(sign, key, provider_text, provider_available=False)
-                    logger.info("horoscope rewrite fallback_only sign=%s section=%s", sign, key)
-                    ai_sections_rejected += 1
-                    continue
-                candidate = ""
-                try:
-                    prompt = self._build_horoscope_sign_prompt(provider_text)
-                    candidate = await asyncio.wait_for(
-                        self._ai.ask_for_task(
-                            "campaign_editorial",
-                            prompt,
-                            "Assistente editoriale",
-                            timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
-                        ),
-                        timeout=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
-                    )
-                except TimeoutError:
-                    logger.warning("campaign content: horoscope editorial timeout sign=%s section=%s", sign, key)
-                except Exception as exc:
-                    logger.warning("campaign content: horoscope editorial ask failed sign=%s section=%s (%s)", sign, key, exc.__class__.__name__)
-
-                if isinstance(candidate, str) and candidate.strip():
-                    normalized_candidate = self._postprocess_horoscope_text(sign, candidate)
-                    if normalized_candidate and not self._looks_non_italian_or_mixed(normalized_candidate):
-                        sign_payload[key] = normalized_candidate
-                        ai_applied = True
-                        ai_sections_accepted += 1
-                    else:
-                        sign_payload[key] = self._rewrite_section_to_safe_italian(sign, key, provider_text, provider_available=True)
-                        logger.info("horoscope rewrite forced_italianization sign=%s section=%s", sign, key)
-                        ai_sections_rejected += 1
-                        forced_italianization += 1
-                else:
-                    sign_payload[key] = self._rewrite_section_to_safe_italian(sign, key, provider_text, provider_available=True)
-                    logger.info("horoscope rewrite forced_italianization sign=%s section=%s", sign, key)
-                    ai_sections_rejected += 1
-                    forced_italianization += 1
-        logger.info(
-            "horoscope rewrite ai_sections_accepted=%s ai_sections_rejected=%s",
-            ai_sections_accepted,
-            ai_sections_rejected,
-        )
-        validated_signs = 0
-        for sign in SIGN_ORDER:
-            sign_payload = signs.get(sign)
             if not isinstance(sign_payload, dict):
                 continue
-            provider_available = sign in provider_backed_signs
-            for section in HOROSCOPE_SECTIONS:
-                section_text = self._normalize_horoscope_section_text(sign, section, str(sign_payload.get(section) or ""))
-                if self._looks_non_italian_or_mixed(section_text):
-                    section_text = self._rewrite_section_to_safe_italian(sign, section, str(original_compact.get(sign, {}).get(section) or ""), provider_available=provider_available)
-                    logger.info("horoscope rewrite forced_italianization sign=%s section=%s", sign, section)
-                    forced_italianization += 1
-                sign_payload[section] = self._postprocess_horoscope_text(sign, section_text)
-            validated_signs += 1
-        self._enforce_horoscope_diversity(payload, original_signs=original_compact)
-        logger.info("horoscope rewrite forced_italianizations=%s", forced_italianization)
-        logger.info("horoscope rewrite final_payload_validated signs=%s", validated_signs)
+            source_text = str(compact.get(sign, {}).get("horoscope") or "")
+            provider_available = bool(source_text.strip()) and not bool(sign_payload.get("fallback_used"))
+            if not source_text.strip():
+                logger.info("horoscope rewrite start sign=%s ai=false reason=empty_source", sign)
+                sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text)
+                logger.info("horoscope rewrite fallback sign=%s reason=empty_source", sign)
+                continue
+            logger.info("horoscope rewrite start sign=%s ai=true timeout=%.1fs", sign, _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS)
+            candidate = ""
+            try:
+                prompt = self._build_horoscope_sign_prompt(source_text)
+                candidate = await self._ai.ask_for_task(
+                    "campaign_editorial",
+                    prompt,
+                    "Assistente editoriale",
+                    timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                logger.warning("campaign content: horoscope editorial timeout sign=%s timeout=%.1fs", sign, _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS)
+            except Exception as exc:
+                logger.warning("campaign content: horoscope editorial ask failed sign=%s (%s)", sign, exc.__class__.__name__)
+
+            rewritten = self._postprocess_horoscope_text(sign, candidate) if isinstance(candidate, str) and candidate.strip() else ""
+            if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
+                sign_payload["horoscope"] = rewritten
+                ai_applied = True
+                logger.info("horoscope rewrite done sign=%s ai=true", sign)
+                continue
+            sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=provider_available)
+            logger.info("horoscope rewrite fallback sign=%s reason=ai_unusable", sign)
+
+        self._enforce_horoscope_diversity(payload, original_signs=compact)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
 
     @staticmethod
@@ -913,134 +866,13 @@ class CampaignContentService:
             return True
         return False
 
-    def _rewrite_section_to_safe_italian(self, sign: str, section: str, original_text: str, *, provider_available: bool) -> str:
-        normalized = self._normalize_horoscope_section_text(sign, section, original_text)
-        if section == "horoscope":
-            if provider_available and normalized:
-                return self._postprocess_horoscope_text(sign, self._fallback_short_horoscope_translation(normalized))
-            if provider_available and original_text:
-                return self._postprocess_horoscope_text(sign, self._fallback_short_horoscope_translation(original_text))
-            base = "Giornata da gestire con calma: scegli una priorità concreta e non fare troppo cinema."
-            return self._postprocess_horoscope_text(sign, base)
-        if not provider_available:
-            return self._synthetic_horoscope_fallback(sign, section)
+    def _build_horoscope_local_fallback(self, sign: str, source_text: str, *, provider_available: bool = True) -> str:
+        normalized = self._normalize_horoscope_section_text(sign, "horoscope", source_text)
         if not normalized:
-            return self._normalize_horoscope_section_text(
-                sign,
-                section,
-                self._fallback_rewrite_horoscope(sign, section, "", force_italianize=True),
-            )
-        lowered = normalized.lower()
-        cues: list[str] = []
-        cue_pairs = (
-            ("chat", "una conversazione chiarificatrice"),
-            ("message", "un messaggio diretto"),
-            ("delay", "un passaggio rimasto fermo"),
-            ("bug", "una questione tecnica"),
-            ("budget", "il budget quotidiano"),
-            ("spend", "le spese impulsive"),
-            ("subscription", "una spesa ricorrente"),
-            ("criticism", "una critica ricevuta"),
-            ("argument", "una discussione vecchia"),
-            ("sleep", "il recupero fisico"),
-            ("slow", "un ritmo più lento"),
-            ("boost", "una spinta inattesa"),
-            ("opportunity", "un'opportunità concreta"),
-        )
-        for token, cue in cue_pairs:
-            if token in lowered:
-                cues.append(cue)
-        cue_text = cues[0] if cues else "i segnali della giornata"
-        section_templates = {
-            "love": (
-                "In amore scegli chiarezza e ascolto, perché {cue} può sbloccare un equilibrio più sereno."
-                if any(t in lowered for t in ("rebuild", "reconnect", "trust", "message", "chat"))
-                else "In amore evita reazioni a caldo e cura i dettagli, così {cue} resta un punto di forza."
-            ),
-            "work": (
-                "Sul lavoro concentra le priorità e chiudi un passaggio per volta, partendo da {cue}."
-                if any(t in lowered for t in ("close", "finish", "task", "review", "bug", "document"))
-                else "Sul lavoro resta pratico e ordinato, perché {cue} rende la giornata più fluida."
-            ),
-            "money": (
-                "Nei soldi meglio misura e concretezza: gestisci {cue} con attenzione prima di nuove uscite."
-                if any(t in lowered for t in ("spend", "purchase", "budget", "subscription", "postpone"))
-                else "Nei soldi mantieni il controllo e scegli mosse semplici, usando {cue} come bussola."
-            ),
-            "energy": (
-                "L'energia va dosata con intelligenza: alterna slancio e recupero, seguendo {cue}."
-                if any(t in lowered for t in ("intense", "slow", "pace", "night", "morning", "sleep"))
-                else "L'energia resta buona se eviti gli strappi e ti organizzi intorno a {cue}."
-            ),
-            "friction": (
-                "Negli attriti conta il tempismo: abbassa i toni e rispondi con calma quando emerge {cue}."
-                if any(t in lowered for t in ("avoid", "argument", "criticism", "react", "sarcastic"))
-                else "Negli attriti difendi la tua posizione con gentilezza, senza irrigidirti su {cue}."
-            ),
-            "advice": (
-                "Consiglio cricetoso: fai un passo concreto e coerente con {cue}, senza inseguire scorciatoie."
-                if any(t in lowered for t in ("focus", "goal", "choose", "consistency", "practical"))
-                else "Consiglio cricetoso: resta essenziale e costante, trasformando {cue} in una scelta utile."
-            ),
-        }
-        sentence = section_templates.get(section, "Procedi con equilibrio e trasforma i segnali della giornata in scelte concrete.").format(cue=cue_text)
-        return self._normalize_horoscope_section_text(sign, section, sentence)
-
-    def _synthetic_horoscope_fallback(self, sign: str, section: str) -> str:
-        day_seed = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        digest = hashlib.sha256(f"{day_seed}|{sign}|{section}".encode("utf-8")).hexdigest()
-        idx = int(digest[:8], 16) % 3
-        templates: dict[str, tuple[str, str, str]] = {
-            "love": (
-                "In amore scegli **ascolto sincero** e lascia parlare i gesti.",
-                "In amore punta su **chiarezza gentile** e tempi più morbidi.",
-                "In amore difendi **equilibrio emotivo** con una parola in più.",
-            ),
-            "work": (
-                "Sul lavoro resta su **priorità concrete** e chiudi un passaggio alla volta.",
-                "Sul lavoro usa **ordine pratico** e tieni il ritmo senza correre.",
-                "Sul lavoro valorizza **precisione utile** prima delle urgenze.",
-            ),
-            "money": (
-                "Nei soldi scegli **misura lucida** e rinvia ciò che non è essenziale.",
-                "Nei soldi tieni **budget ordinato** e limita gli impulsi.",
-                "Nei soldi premia **scelte sobrie** e verifica due volte le uscite.",
-            ),
-            "energy": (
-                "L'energia rende di più con **passi regolari** e pause brevi.",
-                "L'energia resta stabile con **recupero mirato** tra un impegno e l'altro.",
-                "L'energia chiede **ritmo intelligente** senza strappi inutili.",
-            ),
-            "friction": (
-                "Negli attriti scegli **toni morbidi** e non rispondere a caldo.",
-                "Negli attriti salva **pazienza attiva** e chiarisci con calma.",
-                "Negli attriti proteggi **confini chiari** senza irrigidirti.",
-            ),
-            "advice": (
-                "Consiglio cricetoso: punta su **un passo concreto** e portalo fino in fondo.",
-                "Consiglio cricetoso: scegli **costanza leggera** e lascia perdere il rumore.",
-                "Consiglio cricetoso: usa **focus realistico** e semplifica la giornata.",
-            ),
-        }
-        section_templates = templates.get(section, ("Scegli **equilibrio pratico** e continua con calma.",) * 3)
-        return self._normalize_horoscope_section_text(sign, section, section_templates[idx])
-
-    def _fallback_rewrite_horoscope(self, sign: str, section: str, text: str, *, force_italianize: bool = False) -> str:
-        normalized = self._normalize_horoscope_section_text(sign, section, text)
-        if not normalized:
-            empty_fallbacks = {
-                "love": "In amore ascolta di più e fai un passo gentile.",
-                "work": "Sul lavoro punta alle priorità e chiudi una cosa per volta.",
-                "money": "Nei soldi tieni d'occhio il budget e riduci gli slanci.",
-                "energy": "Energia a onde: alterna sprint e recupero.",
-                "friction": "Evita risposte a caldo e abbassa i toni.",
-                "advice": "Consiglio cricetoso: un passo piccolo ma concreto.",
-                "horoscope": "Oggi tieni il punto su una sola priorità: meno caos, più **chiarezza** con stile 😵‍💫✨.",
-            }
-            return sanitize_horoscope_text(sign, empty_fallbacks.get(section, "Mantieni il passo con calma."))
-        if not force_italianize and not self._looks_non_italian_or_mixed(normalized):
-            return normalized
-        return self._rewrite_section_to_safe_italian(sign, section, normalized, provider_available=True)
+            base = "Oggi vai di **priorità furba**: meno caos, più risultato e zero drammi."
+            return self._append_horoscope_emoji(base, sign=sign)
+        localized = self._fallback_short_horoscope_translation(normalized if provider_available else source_text)
+        return self._append_horoscope_emoji(self._postprocess_horoscope_text(sign, localized, with_emoji=False), sign=sign)
 
     def _apply_horoscope_local_fallback(self, payload: dict[str, Any]) -> None:
         signs = payload.get("signs")
@@ -1052,7 +884,7 @@ class CampaignContentService:
                 continue
             for section in HOROSCOPE_SECTIONS:
                 original = str(sign_payload.get(section) or "")
-                sign_payload[section] = self._fallback_rewrite_horoscope(sign, section, original)
+                sign_payload[section] = self._build_horoscope_local_fallback(sign, original)
 
     async def _reapply_author_after_split(self, embeds: list[discord.Embed], *, service_name: str) -> list[discord.Embed]:
         for embed in embeds:
@@ -1077,29 +909,15 @@ class CampaignContentService:
         for sign, sign_payload in signs.items():
             if not isinstance(sign_payload, dict):
                 continue
-            for section in HOROSCOPE_SECTIONS:
-                text = str(sign_payload.get(section) or "").strip()
-                source_text = str((original_signs or {}).get(sign, {}).get(section) or text)
-                if force_override:
-                    provider_available = not bool(sign_payload.get("fallback_used")) and bool(source_text.strip())
-                    sign_payload[section] = self._rewrite_section_to_safe_italian(
-                        sign,
-                        section,
-                        source_text,
-                        provider_available=provider_available,
-                    )
-                    continue
-                if not text:
-                    continue
-                if not self._looks_non_italian_or_mixed(text):
-                    sign_payload[section] = self._normalize_horoscope_section_text(sign, section, text)
-                    continue
+            text = str(sign_payload.get("horoscope") or "").strip()
+            source_text = str((original_signs or {}).get(sign, {}).get("horoscope") or text)
+            if force_override or not text or self._looks_non_italian_or_mixed(text):
                 provider_available = not bool(sign_payload.get("fallback_used")) and bool(source_text.strip())
-                sign_payload[section] = self._rewrite_section_to_safe_italian(
-                    sign,
-                    section,
-                    source_text,
-                    provider_available=provider_available,
+                sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=provider_available)
+            else:
+                sign_payload["horoscope"] = self._append_horoscope_emoji(
+                    self._postprocess_horoscope_text(sign, text, with_emoji=False),
+                    sign=sign,
                 )
 
     @staticmethod
@@ -1114,15 +932,15 @@ class CampaignContentService:
         signs = payload.get("signs", {})
         rendered: dict[str, str] = {}
         for sign, sign_payload in signs.items():
-            combined = " ".join(str(sign_payload.get(k) or "") for k in ["love", "work", "money", "energy", "friction", "advice"])
+            if not isinstance(sign_payload, dict):
+                continue
+            combined = str(sign_payload.get("horoscope") or "").strip()
             for seen_sign, seen_text in rendered.items():
                 if self._simple_similarity(combined, seen_text) >= 0.78:
                     source_sections = (original_signs or {}).get(sign, {})
-                    for section in HOROSCOPE_SECTIONS:
-                        source_text = str(source_sections.get(section) or "")
-                        if source_text:
-                            sign_payload[section] = self._fallback_rewrite_horoscope(sign, section, source_text)
-                    combined = " ".join(str(sign_payload.get(k) or "") for k in ["love", "work", "money", "energy", "friction", "advice"])
+                    source_text = str(source_sections.get("horoscope") or "")
+                    sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text)
+                    combined = str(sign_payload.get("horoscope") or "").strip()
                     break
             rendered[sign] = combined
 
@@ -1151,8 +969,6 @@ class CampaignContentService:
             ("love", "amore"),
             ("money", "soldi"),
             ("energy", "energia"),
-            ("friction", "attriti"),
-            ("advice", "consiglio"),
             ("trust", "fiducia"),
             ("subscription", "abbonamento"),
             ("careful", "prudente"),
@@ -1160,17 +976,6 @@ class CampaignContentService:
         localized = normalized
         for src, dst in replacements:
             localized = re.sub(rf"\b{re.escape(src)}\b", dst, localized, flags=re.IGNORECASE)
-        section_prefix = {
-            "love": "In amore",
-            "work": "Sul lavoro",
-            "money": "Nei soldi",
-            "energy": "Energia",
-            "friction": "Attriti",
-            "advice": "Consiglio",
-        }.get(section, "")
-        lower = localized.lower()
-        if section_prefix and not lower.startswith(section_prefix.lower()):
-            localized = f"{section_prefix}: {localized[0].lower() + localized[1:] if localized else localized}"
         return localized
 
     @staticmethod
@@ -1198,13 +1003,13 @@ class CampaignContentService:
     def _fallback_short_horoscope_translation(self, text: str) -> str:
         normalized = re.sub(r"\s+", " ", str(text or "")).strip()
         if not normalized:
-            return "Oggi tieni il passo con **calma lucida** e scegli una sola priorità 🙂"
+            return "Oggi tieni il passo con **calma lucida** e scegli una sola priorità."
         first_two = " ".join(self._split_sentences(normalized)[:2]).strip() or normalized[:200].strip()
         clipped = first_two[:200].strip()
         translated = self._content_preserving_localize_section("horoscope", clipped)
         return translated or clipped
 
-    def _postprocess_horoscope_text(self, sign: str, text: str) -> str:
+    def _postprocess_horoscope_text(self, sign: str, text: str, *, with_emoji: bool = True) -> str:
         cleaned = self._normalize_horoscope_section_text(sign, "horoscope", text)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         cleaned = _NEWS_EMOJI_RE.sub("", cleaned).strip()
@@ -1223,7 +1028,41 @@ class CampaignContentService:
                 cleaned = f"**{' '.join(words[:focus_len])}** {' '.join(words[focus_len:])}".strip()
         if not cleaned.endswith((".", "!", "?")):
             cleaned = f"{cleaned}."
-        return f"{cleaned} 🙂".strip()
+        return self._append_horoscope_emoji(cleaned, sign=sign) if with_emoji else cleaned
+
+    def _append_horoscope_emoji(self, text: str, *, sign: str) -> str:
+        body = _NEWS_EMOJI_RE.sub("", str(text or "")).strip()
+        if not body:
+            body = "Giornata da vivere con **equilibrio furbo** e poche mosse fatte bene."
+        if not body.endswith((".", "!", "?")):
+            body = f"{body}."
+        return f"{body} {self._pick_horoscope_emoji(sign=sign, text=body)}"
+
+    @staticmethod
+    def _pick_horoscope_emoji(*, sign: str, text: str) -> str:
+        lowered = str(text or "").lower()
+        if any(token in lowered for token in ("calma", "prudenza", "rallenta", "pazienza")):
+            pool = ("🧘", "🌿", "😌")
+        elif any(token in lowered for token in ("slancio", "opportun", "spinta", "focus", "energia")):
+            pool = ("🚀", "⚡", "🔥")
+        elif any(token in lowered for token in ("cuore", "amore", "dialogo", "messaggio")):
+            pool = ("💌", "💕", "🥰")
+        else:
+            pool = ("😏", "🐹", "✨")
+        day_seed = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        idx = int(hashlib.sha256(f"{day_seed}|{sign}|{lowered}".encode("utf-8")).hexdigest()[:8], 16) % len(pool)
+        return pool[idx]
+
+    def _is_horoscope_text_acceptable(self, candidate: str, source_text: str) -> bool:
+        cleaned = self._normalize_horoscope_section_text("", "horoscope", candidate)
+        if self._looks_non_italian_or_mixed(cleaned):
+            return False
+        words = re.findall(r"[a-zàèéìòù']+", cleaned.lower())
+        english_words = {word for word in words if word in _HOROSCOPE_ENGLISH_MARKERS}
+        if len(english_words) >= 2:
+            return False
+        similarity = SequenceMatcher(a=cleaned.lower(), b=str(source_text or "").lower()).ratio()
+        return similarity < 0.93
 
     def _normalize_horoscope_section_text(self, sign: str, section: str, text: str) -> str:
         cleaned = sanitize_horoscope_text(sign, str(text or ""))
@@ -1247,17 +1086,7 @@ class CampaignContentService:
         alias = english_aliases.get(sign)
         if alias:
             cleaned = re.sub(rf"(?i)\b{re.escape(alias)}\b", "", cleaned)
-        section_prefixes = {
-            "love": r"(?:in amore|amore)\s*[:\-–|]+\s*",
-            "work": r"(?:sul lavoro|lavoro)\s*[:\-–|]+\s*",
-            "money": r"(?:nei soldi|soldi|money)\s*[:\-–|]+\s*",
-            "energy": r"(?:energia)\s*[:\-–|]+\s*",
-            "friction": r"(?:attriti|friction)\s*[:\-–|]+\s*",
-            "advice": r"(?:consiglio|advice)\s*[:\-–|]+\s*",
-        }
-        prefix_pattern = section_prefixes.get(section)
-        if prefix_pattern:
-            cleaned = re.sub(rf"(?i)^{prefix_pattern}", "", cleaned).strip()
+        _ = section
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" -–|:;,.")
         return sanitize_horoscope_text(sign, cleaned)
 

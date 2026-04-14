@@ -229,17 +229,7 @@ def sanitize_horoscope_text(sign: str, text: str) -> str:
     cleaned = sanitize_plain_text(text)
     if not cleaned:
         return ""
-    heading_pattern = (
-        rf"^({re.escape(sign)}\s*[:\-–|]+\s*|{re.escape(sign)}\s+)?"
-        r"(love\s*alert|money\s*vibes|energia\s*del\s*genio|amore|lavoro|soldi|energia|consiglio|friction)\s*[:\-–|]+\s*"
-    )
-    cleaned = re.sub(heading_pattern, "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(rf"(?i)^\s*{re.escape(sign)}\b[\s,:;\-–|]*", "", cleaned)
-    cleaned = re.sub(
-        rf"(?i)^(in amore|sul lavoro|nei soldi|energia|attriti|consiglio)\s+{re.escape(sign)}\b[\s,:;\-–|]*",
-        r"\1 ",
-        cleaned,
-    )
     cleaned = re.sub(rf"(?i)\b{re.escape(sign)}\b(?=[\s,:;\-–|]+(?:oggi|ora|adesso|qui)\b)", "", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     return cleaned.strip()
@@ -1618,22 +1608,10 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         negative_markers = (
             "bassa", "calo", "tensione", "attrit", "rallenta", "prudenza", "incerto", "fatica", "evita", "caos"
         )
-        section_weights = {
-            "love": 0.45,
-            "work": 0.55,
-            "money": 0.45,
-            "energy": 0.60,
-            "advice": 0.25,
-            "friction": -0.65,
-        }
-        lexical = 0.0
-        for section, weight in section_weights.items():
-            text = sanitize_horoscope_text(sign, str(sign_payload.get(section) or "")).lower()
-            if not text:
-                continue
-            pos_hits = sum(1 for marker in positive_markers if marker in text)
-            neg_hits = sum(1 for marker in negative_markers if marker in text)
-            lexical += weight * (pos_hits - neg_hits * 1.1)
+        text = sanitize_horoscope_text(sign, str(sign_payload.get("horoscope") or "")).lower()
+        pos_hits = sum(1 for marker in positive_markers if marker in text)
+        neg_hits = sum(1 for marker in negative_markers if marker in text)
+        lexical = 0.7 * (pos_hits - neg_hits * 1.1)
         if sign_payload.get("fallback_used"):
             lexical -= 0.35
         deterministic_jitter = (sum(ord(ch) for ch in sign) % 17) / 100.0
@@ -1691,6 +1669,8 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
         if parts:
             cleaned = " ".join(parts[:2]).strip()
+        emoji_matches = re.findall(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]", cleaned)
+        trailing_emoji = emoji_matches[-1] if emoji_matches else "✨"
         cleaned = re.sub(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]", "", cleaned).strip()
         if not re.search(r"\*\*[^*]+\*\*", cleaned):
             words = cleaned.split()
@@ -1699,7 +1679,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
                 cleaned = f"**{' '.join(words[:span])}** {' '.join(words[span:])}".strip()
         if not cleaned.endswith((".", "!", "?")):
             cleaned = f"{cleaned}."
-        return f"- {cleaned} 🙂"
+        return f"- {cleaned} {trailing_emoji}"
 
     sign_fields: list[tuple[str, str]] = []
     for sign in SIGN_ORDER:
