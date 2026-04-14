@@ -6,11 +6,14 @@ import re
 import unicodedata
 import urllib.parse
 import urllib.request
+import asyncio
 import xml.etree.ElementTree as ET
 from html import unescape
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
+
+import httpx
 
 NEWS_SOURCE_CATALOG = [
     {
@@ -1095,6 +1098,152 @@ def fetch_horoscope_content(sources: list[str]) -> dict[str, Any]:
                 "tone": SIGN_MOOD_HINTS[sign],
                 "text": f"{fallback['love']} {fallback['work']}",
             }
+    return {
+        "signs": items,
+        "sources": resolved_sources,
+        "used_sources": used_sources,
+        "configured_sources": sources,
+        "fallback_used": fallback_used,
+    }
+
+
+async def _fetch_horoscope_sign_async(
+    client: httpx.AsyncClient,
+    *,
+    base_url: str,
+    sign: str,
+    slug: str,
+    timeout: float,
+) -> tuple[str, dict[str, Any] | None]:
+    response = await client.get(f"{base_url}/{slug}", timeout=timeout)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return sign, None
+    return sign, payload
+
+
+async def fetch_horoscope_content_async(
+    sources: list[str],
+    *,
+    request_timeout: float = 4.0,
+    max_concurrency: int = 4,
+) -> dict[str, Any]:
+    resolved_sources = _resolve_horoscope_sources(sources)
+    if not resolved_sources:
+        resolved_sources = _resolve_horoscope_sources(DEFAULT_HOROSCOPE_SOURCES)
+
+    base: str | None = None
+    if "https://ohmanda.com/api/horoscope" in resolved_sources:
+        base = "https://ohmanda.com/api/horoscope"
+    else:
+        for source in resolved_sources:
+            if source.startswith(("http://", "https://")):
+                base = source.rstrip("/")
+                break
+
+    slug_map = {
+        "Ariete": "aries",
+        "Toro": "taurus",
+        "Gemelli": "gemini",
+        "Cancro": "cancer",
+        "Leone": "leo",
+        "Vergine": "virgo",
+        "Bilancia": "libra",
+        "Scorpione": "scorpio",
+        "Sagittario": "sagittarius",
+        "Capricorno": "capricorn",
+        "Acquario": "aquarius",
+        "Pesci": "pisces",
+    }
+
+    items: dict[str, dict[str, Any]] = {}
+    used_sources: list[str] = []
+    fallback_used = False
+    if not base:
+        for sign in SIGNS:
+            fallback = SIGN_FALLBACKS[sign]
+            items[sign] = {
+                "sign": sign,
+                **fallback,
+                "source_names": [],
+                "source_snippets": [],
+                "confidence": 0.2,
+                "fallback_used": True,
+                "tone": SIGN_MOOD_HINTS[sign],
+                "text": f"{fallback['love']} {fallback['work']}",
+            }
+        return {
+            "signs": items,
+            "sources": resolved_sources,
+            "used_sources": used_sources,
+            "configured_sources": sources,
+            "fallback_used": True,
+        }
+
+    source_name = urllib.parse.urlparse(base).netloc or base
+    semaphore = asyncio.Semaphore(max(1, max_concurrency))
+
+    async def _bounded_fetch(sign: str, slug: str) -> tuple[str, dict[str, Any] | None]:
+        async with semaphore:
+            try:
+                return await _fetch_horoscope_sign_async(
+                    client,
+                    base_url=base,
+                    sign=sign,
+                    slug=slug,
+                    timeout=request_timeout,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("horoscope_fetch_sign_failed sign=%s provider=%s error=%s", sign, source_name, exc.__class__.__name__)
+                return sign, None
+
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "Barcellometro/1.0"},
+        follow_redirects=True,
+        timeout=request_timeout,
+    ) as client:
+        results = await asyncio.gather(*[_bounded_fetch(sign, slug_map[sign]) for sign in SIGNS])
+
+    for sign, payload in results:
+        fallback = SIGN_FALLBACKS[sign]
+        horoscope = str((payload or {}).get("horoscope") or "").strip()
+        if not horoscope:
+            fallback_used = True
+            items[sign] = {
+                "sign": sign,
+                **fallback,
+                "source_names": [],
+                "source_snippets": [],
+                "confidence": 0.3,
+                "fallback_used": True,
+                "tone": SIGN_MOOD_HINTS[sign],
+                "text": f"{fallback['love']} {fallback['work']}",
+            }
+            continue
+        sections = _split_horoscope_sections(horoscope)
+        merged = {
+            "love": sections.get("love") or fallback["love"],
+            "work": sections.get("work") or fallback["work"],
+            "money": sections.get("money") or fallback["money"],
+            "energy": sections.get("energy") or fallback["energy"],
+            "friction": fallback["friction"],
+            "advice": fallback["advice"],
+        }
+        if source_name and source_name not in used_sources:
+            used_sources.append(source_name)
+        snippet = horoscope[:180]
+        items[sign] = {
+            "sign": sign,
+            **merged,
+            "source_names": [source_name],
+            "source_snippets": [snippet] if snippet else [],
+            "confidence": 0.8,
+            "fallback_used": False,
+            "tone": SIGN_MOOD_HINTS[sign],
+            "text": horoscope,
+        }
+
     return {
         "signs": items,
         "sources": resolved_sources,

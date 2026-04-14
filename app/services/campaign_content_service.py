@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time
 from difflib import SequenceMatcher
 from html import unescape
 from datetime import datetime, timezone
@@ -14,7 +16,7 @@ import discord
 from app.services.ai import AiService
 from app.services.campaign_content_fetchers import (
     fetch_daily_news_extras,
-    fetch_horoscope_content,
+    fetch_horoscope_content_async,
     fetch_news_content,
     fetch_weather_content,
 )
@@ -45,6 +47,7 @@ from app.shared.discord.footer_pipeline import finalize_embeds
 from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
 logger = logging.getLogger(__name__)
+_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 18.0
 
 _NEWS_INPUT_META_RE = re.compile(
     r"(?im)\b(?:ecco una possibile versione in italiano|versione in italiano|in breve|riassunto|sintesi)\b[:\-\s]*"
@@ -171,7 +174,27 @@ class CampaignContentService:
 
     async def execute_horoscope_service(self, config: dict[str, Any]) -> None:
         configured_sources = self._normalize_sources(self._json_to_list(config.get("sources_json")))
-        payload = fetch_horoscope_content(configured_sources)
+        started_at = time.perf_counter()
+        payload = await fetch_horoscope_content_async(configured_sources)
+        fetch_elapsed = time.perf_counter() - started_at
+        signs_payload = payload.get("signs") if isinstance(payload, dict) else {}
+        signs_total = len(signs_payload) if isinstance(signs_payload, dict) else 0
+        signs_fallback = (
+            sum(
+                1
+                for sign_payload in signs_payload.values()
+                if isinstance(sign_payload, dict) and bool(sign_payload.get("fallback_used"))
+            )
+            if isinstance(signs_payload, dict)
+            else 0
+        )
+        logger.info(
+            "campaign content: horoscope fetch complete elapsed=%.2fs signs=%s sign_fallbacks=%s payload_fallback=%s",
+            fetch_elapsed,
+            signs_total,
+            signs_fallback,
+            bool(payload.get("fallback_used")),
+        )
         try:
             used_model = await self._rewrite_horoscope_payload(payload)
         except Exception as exc:
@@ -646,7 +669,20 @@ class CampaignContentService:
         )
         output: str | None = None
         try:
-            output = await self._ai.ask_for_task("campaign_editorial", prompt, "Assistente editoriale")
+            output = await asyncio.wait_for(
+                self._ai.ask_for_task(
+                    "campaign_editorial",
+                    prompt,
+                    "Assistente editoriale",
+                    timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
+                ),
+                timeout=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning(
+                "campaign content: horoscope editorial timeout after %.1fs, using original payload",
+                _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
+            )
         except Exception as exc:
             logger.warning("campaign content: horoscope editorial ask failed (%s), using original payload", exc.__class__.__name__)
         parsed: dict[str, Any] = {}

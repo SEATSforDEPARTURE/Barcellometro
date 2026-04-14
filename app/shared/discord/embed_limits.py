@@ -427,6 +427,7 @@ def _normalize_single_embed(
             field_name = _truncate_field_name(field.name, continuation=idx > 0)
             candidate = discord.Embed.from_dict(current.to_dict())
             copy_footer_meta(current, candidate)
+            copy_author_meta(current, candidate)
             candidate.add_field(name=field_name, value=_truncate_text(chunk, DISCORD_MAX_FIELD_VALUE), inline=field.inline)
             if len(candidate.fields) > DISCORD_MAX_FIELDS or _estimate_embed_size(candidate) > max_chars:
                 if current.description or current.fields or not output:
