@@ -89,6 +89,15 @@ _NEWS_EXTRA_ITALIAN_FALLBACKS = {
     "canzone": "Heroes — David Bowie\nEnergia da prima pagina per la ruota della redazione.",
     "meme": "Quando dici «chiudo in 5 minuti» e la breaking spunta al minuto 6.",
 }
+_HOROSCOPE_ENGLISH_MARKERS = {
+    "you", "your", "today", "darling", "moon", "jupiter", "venus", "mercury", "uranus",
+    "brainstorming", "blessings", "channel", "unexpected", "sessions", "reflected",
+    "indicate", "boost", "work", "love", "money", "energy", "friction", "advice",
+}
+_HOROSCOPE_ITALIAN_STRUCTURAL_MARKERS = {
+    "oggi", "con", "per", "non", "una", "uno", "del", "della", "delle", "sul", "nel", "tra",
+    "mentre", "quindi", "ma", "poi", "anche", "resta", "scegli", "evita", "chiudi", "parla",
+}
 
 
 class CampaignContentService:
@@ -792,40 +801,60 @@ class CampaignContentService:
             logger.warning("campaign content: horoscope editorial ask failed (%s), using original payload", exc.__class__.__name__)
         parsed: dict[str, Any] = {}
         ai_applied = False
+        ai_json_valid = False
         try:
             parsed = json.loads(output or "")
             if not isinstance(parsed, dict):
                 logger.warning("campaign content: horoscope editorial returned non-object json, applying fallback rewrite to all sections")
-                self._apply_horoscope_italian_fallback(payload, force_override=True)
-                self._enforce_horoscope_diversity(payload, original_signs=original_compact)
-                return None
+                parsed = {}
+            else:
+                ai_json_valid = True
         except json.JSONDecodeError:
             logger.warning("campaign content: horoscope editorial returned invalid json, applying fallback rewrite to all sections")
-            self._apply_horoscope_italian_fallback(payload, force_override=True)
-            self._enforce_horoscope_diversity(payload, original_signs=original_compact)
-            return None
-        if not self._is_horoscope_ai_payload_valid(parsed, original_compact):
+            parsed = {}
+        logger.info("horoscope rewrite ai_json_valid=%s", ai_json_valid)
+        if parsed and not self._is_horoscope_ai_payload_valid(parsed, original_compact):
             logger.warning("campaign content: horoscope editorial json missing required sections, applying content-preserving fallback")
-            self._apply_horoscope_italian_fallback(payload, force_override=True)
-            self._enforce_horoscope_diversity(payload, original_signs=original_compact)
-            return None
-        if self._is_horoscope_rewrite_collapsed(parsed):
+            parsed = {}
+        if parsed and self._is_horoscope_rewrite_collapsed(parsed):
             logger.warning("campaign content: horoscope editorial rewrite looks collapsed, using content-preserving fallback")
-            self._apply_horoscope_italian_fallback(payload, force_override=True)
-            self._enforce_horoscope_diversity(payload, original_signs=original_compact)
-            return None
+            parsed = {}
+        ai_language_valid = True
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             rewritten_sign = parsed.get(sign, {}) if isinstance(parsed.get(sign), dict) else {}
             for key in HOROSCOPE_SECTIONS:
+                provider_text = str(original_compact.get(sign, {}).get(key) or "")
                 candidate = rewritten_sign.get(key)
                 if isinstance(candidate, str) and candidate.strip():
-                    sign_payload[key] = self._normalize_horoscope_section_text(sign, key, candidate)
-                    ai_applied = True
+                    normalized_candidate = self._normalize_horoscope_section_text(sign, key, candidate)
+                    if self._looks_non_italian_or_mixed(normalized_candidate):
+                        ai_language_valid = False
+                        sign_payload[key] = self._rewrite_section_to_safe_italian(sign, key, provider_text)
+                        logger.info("horoscope rewrite local_fallback_applied sign=%s section=%s", sign, key)
+                    else:
+                        sign_payload[key] = normalized_candidate
+                        ai_applied = True
                 else:
-                    sign_payload[key] = self._normalize_horoscope_section_text(sign, key, str(sign_payload.get(key) or ""))
-        self._apply_horoscope_italian_fallback(payload)
+                    ai_language_valid = False
+                    sign_payload[key] = self._rewrite_section_to_safe_italian(sign, key, provider_text)
+                    logger.info("horoscope rewrite local_fallback_applied sign=%s section=%s", sign, key)
+        logger.info("horoscope rewrite ai_language_valid=%s", ai_language_valid)
+        self._apply_horoscope_italian_fallback(payload, original_signs=original_compact)
         self._enforce_horoscope_diversity(payload, original_signs=original_compact)
+        validated_signs = 0
+        for sign in SIGN_ORDER:
+            sign_payload = signs.get(sign)
+            if not isinstance(sign_payload, dict):
+                continue
+            for section in HOROSCOPE_SECTIONS:
+                section_text = self._normalize_horoscope_section_text(sign, section, str(sign_payload.get(section) or ""))
+                if self._looks_non_italian_or_mixed(section_text):
+                    section_text = self._rewrite_section_to_safe_italian(sign, section, str(original_compact.get(sign, {}).get(section) or ""))
+                    logger.info("horoscope rewrite local_fallback_applied sign=%s section=%s", sign, section)
+                sign_payload[section] = section_text
+            validated_signs += 1
+        logger.info("horoscope rewrite final_payload_validated signs=%s", validated_signs)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
 
     @staticmethod
@@ -862,6 +891,88 @@ class CampaignContentService:
         en_hits = sum(1 for token in tokens if token in english_tokens)
         return en_hits >= 2 and it_hits == 0
 
+    @staticmethod
+    def _looks_non_italian_or_mixed(text: str) -> bool:
+        lowered = str(text or "").strip().lower()
+        if not lowered:
+            return True
+        normalized = f" {lowered} "
+        english_hits = sum(1 for token in _HOROSCOPE_ENGLISH_MARKERS if f" {token} " in normalized)
+        italian_hits = sum(1 for token in _HOROSCOPE_ITALIAN_STRUCTURAL_MARKERS if f" {token} " in normalized)
+        tokens = re.findall(r"[a-zàèéìòù']+", lowered)
+        if not tokens:
+            return True
+        english_token_hits = sum(1 for token in tokens if token in _HOROSCOPE_ENGLISH_MARKERS)
+        italian_token_hits = sum(1 for token in tokens if token in _HOROSCOPE_ITALIAN_STRUCTURAL_MARKERS)
+        english_ratio = english_token_hits / max(1, len(tokens))
+        if english_hits >= 2 and italian_hits == 0:
+            return True
+        if english_hits >= 1 and italian_hits >= 1:
+            return True
+        if english_ratio >= 0.15 and italian_token_hits <= 1:
+            return True
+        return False
+
+    def _rewrite_section_to_safe_italian(self, sign: str, section: str, original_text: str) -> str:
+        normalized = self._normalize_horoscope_section_text(sign, section, original_text)
+        if not normalized:
+            return self._normalize_horoscope_section_text(sign, section, self._fallback_rewrite_horoscope(sign, section, "", force_italianize=True))
+        lowered = normalized.lower()
+        cues: list[str] = []
+        cue_pairs = (
+            ("chat", "una conversazione chiarificatrice"),
+            ("message", "un messaggio diretto"),
+            ("delay", "un passaggio rimasto fermo"),
+            ("bug", "una questione tecnica"),
+            ("budget", "il budget quotidiano"),
+            ("spend", "le spese impulsive"),
+            ("subscription", "una spesa ricorrente"),
+            ("criticism", "una critica ricevuta"),
+            ("argument", "una discussione vecchia"),
+            ("sleep", "il recupero fisico"),
+            ("slow", "un ritmo più lento"),
+            ("boost", "una spinta inattesa"),
+            ("opportunity", "un'opportunità concreta"),
+        )
+        for token, cue in cue_pairs:
+            if token in lowered:
+                cues.append(cue)
+        cue_text = cues[0] if cues else "i segnali della giornata"
+        section_templates = {
+            "love": (
+                "In amore scegli chiarezza e ascolto, perché {cue} può sbloccare un equilibrio più sereno."
+                if any(t in lowered for t in ("rebuild", "reconnect", "trust", "message", "chat"))
+                else "In amore evita reazioni a caldo e cura i dettagli, così {cue} resta un punto di forza."
+            ),
+            "work": (
+                "Sul lavoro concentra le priorità e chiudi un passaggio per volta, partendo da {cue}."
+                if any(t in lowered for t in ("close", "finish", "task", "review", "bug", "document"))
+                else "Sul lavoro resta pratico e ordinato, perché {cue} rende la giornata più fluida."
+            ),
+            "money": (
+                "Nei soldi meglio misura e concretezza: gestisci {cue} con attenzione prima di nuove uscite."
+                if any(t in lowered for t in ("spend", "purchase", "budget", "subscription", "postpone"))
+                else "Nei soldi mantieni il controllo e scegli mosse semplici, usando {cue} come bussola."
+            ),
+            "energy": (
+                "L'energia va dosata con intelligenza: alterna slancio e recupero, seguendo {cue}."
+                if any(t in lowered for t in ("intense", "slow", "pace", "night", "morning", "sleep"))
+                else "L'energia resta buona se eviti gli strappi e ti organizzi intorno a {cue}."
+            ),
+            "friction": (
+                "Negli attriti conta il tempismo: abbassa i toni e rispondi con calma quando emerge {cue}."
+                if any(t in lowered for t in ("avoid", "argument", "criticism", "react", "sarcastic"))
+                else "Negli attriti difendi la tua posizione con gentilezza, senza irrigidirti su {cue}."
+            ),
+            "advice": (
+                "Consiglio cricetoso: fai un passo concreto e coerente con {cue}, senza inseguire scorciatoie."
+                if any(t in lowered for t in ("focus", "goal", "choose", "consistency", "practical"))
+                else "Consiglio cricetoso: resta essenziale e costante, trasformando {cue} in una scelta utile."
+            ),
+        }
+        sentence = section_templates.get(section, "Procedi con equilibrio e trasforma i segnali della giornata in scelte concrete.").format(cue=cue_text)
+        return self._normalize_horoscope_section_text(sign, section, sentence)
+
     def _fallback_rewrite_horoscope(self, sign: str, section: str, text: str, *, force_italianize: bool = False) -> str:
         normalized = self._normalize_horoscope_section_text(sign, section, text)
         if not normalized:
@@ -874,10 +985,9 @@ class CampaignContentService:
                 "advice": "Consiglio cricetoso: un passo piccolo ma concreto.",
             }
             return sanitize_horoscope_text(sign, empty_fallbacks.get(section, "Mantieni il passo con calma."))
-        if not force_italianize and not self._should_italianize_horoscope_text(normalized):
+        if not force_italianize and not self._looks_non_italian_or_mixed(normalized):
             return normalized
-        localized = self._content_preserving_localize_section(section, normalized)
-        return self._normalize_horoscope_section_text(sign, section, localized)
+        return self._rewrite_section_to_safe_italian(sign, section, normalized)
 
     def _apply_horoscope_local_fallback(self, payload: dict[str, Any]) -> None:
         signs = payload.get("signs")
@@ -900,7 +1010,13 @@ class CampaignContentService:
             default_service_name=service_name,
         )
 
-    def _apply_horoscope_italian_fallback(self, payload: dict[str, Any], *, force_override: bool = False) -> None:
+    def _apply_horoscope_italian_fallback(
+        self,
+        payload: dict[str, Any],
+        *,
+        force_override: bool = False,
+        original_signs: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         signs = payload.get("signs")
         if not isinstance(signs, dict):
             return
@@ -910,15 +1026,16 @@ class CampaignContentService:
                 continue
             for section in HOROSCOPE_SECTIONS:
                 text = str(sign_payload.get(section) or "").strip()
+                source_text = str((original_signs or {}).get(sign, {}).get(section) or text)
                 if force_override:
-                    sign_payload[section] = self._fallback_rewrite_horoscope(sign, section, text, force_italianize=True)
+                    sign_payload[section] = self._rewrite_section_to_safe_italian(sign, section, source_text)
                     continue
                 if not text:
                     continue
-                if self._looks_italian_text(text):
+                if not self._looks_non_italian_or_mixed(text):
                     sign_payload[section] = self._normalize_horoscope_section_text(sign, section, text)
                     continue
-                sign_payload[section] = self._fallback_rewrite_horoscope(sign, section, text)
+                sign_payload[section] = self._rewrite_section_to_safe_italian(sign, section, source_text)
 
     @staticmethod
     def _simple_similarity(a: str, b: str) -> float:
