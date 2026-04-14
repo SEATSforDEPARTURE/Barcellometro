@@ -48,9 +48,14 @@ class _FakeChannel(discord.abc.Messageable):
     async def _get_channel(self):
         return self
 
-    async def send(self, *, embed: discord.Embed, view=None, **kwargs):  # noqa: ANN003
-        self.sent.append(embed)
-        return SimpleNamespace(id=321, embed=embed, view=view, kwargs=kwargs)
+    async def send(self, *, embed: discord.Embed | None = None, embeds: list[discord.Embed] | None = None, view=None, **kwargs):  # noqa: ANN003
+        if embeds is not None:
+            self.sent.extend(embeds)
+            return SimpleNamespace(id=321, embed=embeds[0], view=view, kwargs=kwargs)
+        if embed is not None:
+            self.sent.append(embed)
+            return SimpleNamespace(id=321, embed=embed, view=view, kwargs=kwargs)
+        raise ValueError("No embed provided")
 
 
 def _build_footer_service(db: _FooterDb) -> FooterService:
