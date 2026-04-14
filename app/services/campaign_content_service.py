@@ -263,8 +263,15 @@ class CampaignContentService:
         if not isinstance(channel, discord.abc.Messageable):
             return
         page_map = self._build_page_map(service_type, payload_embeds=embeds, payload=payload)
+        embeds_to_send = len(embeds)
+        logger.info(
+            "campaign content: %s publish start channel=%s embeds_to_send=%s",
+            service_type.lower(),
+            channel_id,
+            embeds_to_send,
+        )
         try:
-            message = await channel.send(embed=embeds[0])
+            message = await channel.send(embeds=embeds)
         except Exception as exc:
             logger.exception(
                 "campaign content: %s publish failed channel=%s embeds=%s error=%s",
