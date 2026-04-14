@@ -1469,14 +1469,14 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
     most_calm = min(area_scores.items(), key=lambda x: x[1])[0] if area_scores else "n/d"
     thermal_range = f"{round(min(all_temps), 1)}°C – {round(max(all_temps), 1)}°C" if all_temps else "n/d"
     now_utc = _overview_now(payload)
-    edition_label, daypart = news_edition_label_for_datetime(now_utc)
+    _edition_label, daypart = news_edition_label_for_datetime(now_utc)
     greeting = NEWS_DAYPART_GREETING.get(daypart, NEWS_DAYPART_GREETING["pomeriggio"])
 
     selected_areas = {slugify_label(item) for item in str(config.get("categories_json") or "").split(",") if str(item).strip()}
     if not selected_areas:
         selected_areas = set(WEATHER_AREAS)
 
-    overview = discord.Embed(title=f"🌦️ {format_standard_title(f'METEO ITALIA • {edition_label}')}", color=color)
+    overview = discord.Embed(title=f"🌦️ {format_standard_title('METEO CRICETOSO • PANORAMICA')}", color=color)
     overview.description = format_standard_description(
         (
             f"**{greeting}** 🐹: qui **Barcellometro in regia**, con il quadro del meteo nazionale. "
@@ -1494,12 +1494,7 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         value=f"• **{most_calm}**",
         inline=False,
     )
-    overview.add_field(
-        name=format_standard_field_name("RANGE TERMICO", emoji="🌡️"),
-        value=f"• **{thermal_range}**",
-        inline=False,
-    )
-
+    detail_fields: list[tuple[str, str]] = []
     for region in ["Nord", "Centro", "Sud", "Isole"]:
         if slugify_label(region) not in selected_areas:
             continue
@@ -1528,23 +1523,69 @@ def build_weather_embeds(config: dict[str, Any], payload: dict[str, Any]) -> lis
         wind_summary = area_payload.get("wind_summary", "vento in osservazione")
         focus = f"• **Focus area:** {precipitation_summary} · {wind_summary}"
         value = "\n".join(row)
-        overview.add_field(
-            name=format_standard_field_name(region.upper(), emoji="📍"),
-            value=f"{value[:780]}\n{focus[:220]}",
-            inline=False,
+        detail_fields.append(
+            (
+                format_standard_field_name(region.upper(), emoji="📍"),
+                f"{value[:780]}\n{focus[:220]}",
+            )
         )
+
+    trailing_fields: list[tuple[str, str]] = [
+        (format_standard_field_name("RANGE TERMICO", emoji="🌡️"), f"• **{thermal_range}**")
+    ]
     next_run_field = _next_weather_run_field(config, generated_at=now_utc)
     if next_run_field:
-        overview.add_field(
-            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
-            value=next_run_field,
-            inline=False,
+        trailing_fields.append((format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"), next_run_field))
+
+    embeds: list[discord.Embed] = [overview]
+    details_title = f"🌦️ {format_standard_title('METEO CRICETOSO • LE AREE')}"
+    details_description = format_standard_description("Vediamo nel dettaglio le zone climatiche...", blank_line_before_fields=True)
+    detail_pages: list[discord.Embed] = []
+    current = discord.Embed(title=details_title, color=color)
+    current.description = details_description
+    for field_name, field_value in detail_fields:
+        candidate = discord.Embed.from_dict(current.to_dict())
+        candidate.add_field(name=field_name, value=field_value, inline=False)
+        if len(candidate.fields) > 25 or len(candidate) > 6000:
+            if current.fields:
+                detail_pages.append(current)
+            current = discord.Embed(title=details_title, color=color)
+            current.description = details_description
+            current.add_field(name=field_name, value=field_value, inline=False)
+            continue
+        current = candidate
+
+    if current.fields:
+        detail_pages.append(current)
+    elif trailing_fields:
+        detail_pages.append(discord.Embed(title=details_title, color=color))
+        detail_pages[-1].description = details_description
+
+    if trailing_fields:
+        if not detail_pages:
+            detail_pages.append(discord.Embed(title=details_title, color=color))
+            detail_pages[-1].description = details_description
+        final_page = detail_pages[-1]
+        for field_name, field_value in trailing_fields:
+            final_page.add_field(name=field_name, value=field_value, inline=False)
+
+    embeds.extend(detail_pages)
+    return _apply_campaign_footer(embeds, service_name="campagne_meteo")
+
+
+def build_weather_page_map(total_pages: int = 1) -> list[dict[str, Any]]:
+    safe_total = max(1, int(total_pages or 1))
+    page_map = [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    for idx in range(1, safe_total):
+        page_map.append(
+            {
+                "type": "areas",
+                "key": f"areas_{idx}",
+                "label": f"Aree · Pagina {idx}",
+                "page": idx,
+            }
         )
-    return _apply_campaign_footer([overview], service_name="campagne_meteo")
-
-
-def build_weather_page_map() -> list[dict[str, Any]]:
-    return [{"type": "overview", "key": "overview", "label": "Overview Italia", "page": 0}]
+    return page_map
 
 
 def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> list[discord.Embed]:
