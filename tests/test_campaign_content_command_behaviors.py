@@ -503,6 +503,19 @@ def test_weather_and_horoscope_schedule_commands_expose_guided_autocomplete() ->
     assert "@app_commands.autocomplete(sources=_horoscope_sources_autocomplete, categories=_horoscope_signs_autocomplete)" in source
 
 
+
+
+def test_news_source_choices_match_supported_dropdown_values(messaggi_module) -> None:
+    assert messaggi_module.NEWS_SOURCE_CHOICES == [
+        "ansa",
+        "repubblica",
+        "open",
+        "wired",
+        "corriere",
+        "agi",
+        "adnkronos",
+    ]
+
 def test_weather_sources_autocomplete_filters_and_excludes_selected(messaggi_module) -> None:
     choices = messaggi_module._compose_guided_csv_suggestions(
         "open-meteo, m",
