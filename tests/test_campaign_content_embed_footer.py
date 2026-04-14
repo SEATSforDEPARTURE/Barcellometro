@@ -299,9 +299,9 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
         {
             "generated_at": "2026-04-09T14:30:00+00:00",
             "signs": {
-                "Ariete": {"love": "Amore in crescita! Mantieni il ritmo.", "work": "Concentrati su un obiettivo. Evita distrazioni.", "money": "Spese da filtrare", "energy": "Alta e costante", "confidence": 0.95, "tone": "frizzante"},
-                "Gemelli": {"love": "Dialogo efficace", "work": "Proposte convincenti", "money": "Budget solido", "energy": "Molto alta", "confidence": 1.0, "tone": "reattivo"},
-                "Toro": {"love": "Pazienza", "work": "Passo lento", "money": "Prudenza", "energy": "Bassa", "confidence": 0.2, "tone": "cauto"},
+                "Ariete": {"horoscope": "Oggi scegli **chiarezza** e vai dritto senza fare drama 😵‍💫✨", "confidence": 0.95, "tone": "frizzante"},
+                "Gemelli": {"horoscope": "Parla semplice: una mossa **smart** ti sblocca la giornata 😎", "confidence": 1.0, "tone": "reattivo"},
+                "Toro": {"horoscope": "Meglio rallentare e difendere il **budget** con calma 🐹", "confidence": 0.2, "tone": "cauto"},
             },
         },
     )
@@ -314,20 +314,18 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
     assert (horoscope_pages[1].description or "").startswith("*Leggiamo l’oroscopo segno per segno...*")
     assert "🤗 __**SEGNI IN FORMA**__" in field_map
     assert "🤬 __**SEGNI IRREQUIETI**__" in field_map
-    assert "🌟 __**SEGNO DEL GIORNO**__" in field_map
+    assert "🌟 __**SEGNO DEL GIORNO**__" not in field_map
     assert field_map["🤗 __**SEGNI IN FORMA**__"].startswith("• **")
     assert field_map["🤬 __**SEGNI IRREQUIETI**__"].startswith("• **")
     assert "♈ Ariete" in field_map["🤗 __**SEGNI IN FORMA**__"] or "♈ Ariete" in field_map["🤬 __**SEGNI IRREQUIETI**__"]
-    assert field_map["🌟 __**SEGNO DEL GIORNO**__"].splitlines()[0].startswith("• **")
-    assert signs_field_map["♈ __**ARIETE**__"].startswith("• ❤️: ")
-    assert signs_field_map["♈ __**ARIETE**__"].count("\n") == 3
-    assert "• 💼: " in signs_field_map["♈ __**ARIETE**__"]
-    assert "• 💰: " in signs_field_map["♈ __**ARIETE**__"]
-    assert "• ⚡: " in signs_field_map["♈ __**ARIETE**__"]
-    assert "**" in signs_field_map["♈ __**ARIETE**__"]
-    assert signs_field_map["♈ __**ARIETE**__"].count("❤️") == 1
-    assert "🔜 __**PROSSIMA EDIZIONE**__" in field_map
-    next_edition_value = field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+    assert signs_field_map["♈ __**ARIETE**__"].startswith("- ")
+    assert signs_field_map["♈ __**ARIETE**__"].count("\n") == 0
+    assert "In amore" not in signs_field_map["♈ __**ARIETE**__"]
+    assert "Sul lavoro" not in signs_field_map["♈ __**ARIETE**__"]
+    assert "Nei soldi" not in signs_field_map["♈ __**ARIETE**__"]
+    assert "chiarezza" in signs_field_map["♈ __**ARIETE**__"].lower()
+    assert "🔜 __**PROSSIMA EDIZIONE**__" in signs_field_map
+    next_edition_value = signs_field_map["🔜 __**PROSSIMA EDIZIONE**__"]
     assert next_edition_value.startswith("Il criceto chiude il taccuino per ora.")
     assert "Ci rivediamo alle **19:30** con la prossima edizione." in next_edition_value
     assert "\n" in next_edition_value
@@ -348,24 +346,20 @@ def test_horoscope_overview_scores_avoid_trivial_overlap_and_order_bias() -> Non
     payload = {
         "generated_at": "2026-04-09T14:30:00+00:00",
         "signs": {
-            "Ariete": {"love": "serve prudenza", "work": "rallenta", "money": "evita spese", "energy": "bassa", "confidence": 0.1, "tone": "cauto"},
-            "Toro": {"love": "dialogo sereno", "work": "focus ottimo", "money": "budget stabile", "energy": "alta", "confidence": 0.95, "tone": "frizzante"},
-            "Gemelli": {"love": "bene", "work": "bene", "money": "bene", "energy": "buona", "confidence": 0.75, "tone": "reattivo"},
-            "Cancro": {"love": "incertezze", "work": "fatica", "money": "prudenza", "energy": "calo", "confidence": 0.2, "tone": "prudente"},
-            "Leone": {"love": "buona intesa", "work": "opportunità", "money": "ok", "energy": "alta", "confidence": 0.82, "tone": "carico"},
-            "Vergine": {"love": "ok", "work": "ok", "money": "ok", "energy": "buona", "confidence": 0.65, "tone": "stabile"},
+            "Ariete": {"horoscope": "serve prudenza, evita spese e resta con energia bassa", "confidence": 0.1, "tone": "cauto"},
+            "Toro": {"horoscope": "dialogo sereno, focus ottimo, budget stabile e energia alta", "confidence": 0.95, "tone": "frizzante"},
+            "Gemelli": {"horoscope": "bene bene bene, energia buona", "confidence": 0.75, "tone": "reattivo"},
+            "Cancro": {"horoscope": "incertezze, fatica, prudenza, calo", "confidence": 0.2, "tone": "prudente"},
+            "Leone": {"horoscope": "buona intesa e opportunità con energia alta", "confidence": 0.82, "tone": "carico"},
+            "Vergine": {"horoscope": "ok con energia buona", "confidence": 0.65, "tone": "stabile"},
         },
     }
     pages = build_horoscope_embeds({}, payload)
     overview_fields = {field.name: field.value or "" for field in pages[0].fields}
     top_signs = set(re.findall(r"\*\*([^*]+)\*\*", overview_fields["🤗 __**SEGNI IN FORMA**__"]))
     delicate_signs = set(re.findall(r"\*\*([^*]+)\*\*", overview_fields["🤬 __**SEGNI IRREQUIETI**__"]))
-    sign_of_day = re.findall(r"\*\*([^*]+)\*\*", overview_fields["🌟 __**SEGNO DEL GIORNO**__"])[0]
-
     assert top_signs
     assert delicate_signs
-    assert sign_of_day == "Toro"
-    assert sign_of_day != "Ariete"
     assert top_signs != delicate_signs
     assert top_signs.isdisjoint(delicate_signs)
 
@@ -374,14 +368,14 @@ def test_horoscope_local_fallback_force_override_translates_without_readding_sig
     service = CampaignContentService(database=types.SimpleNamespace(), bot=types.SimpleNamespace(), ai_service=None)
     payload = {
         "signs": {
-            sign: {section: "You are reminded to stay calm today." for section in ["love", "work", "money", "energy", "friction", "advice"]}
+            sign: {"horoscope": "You are reminded to stay calm today."}
             for sign in ["Ariete", "Toro", "Gemelli", "Cancro"]
         }
     }
     service._apply_horoscope_italian_fallback(payload, force_override=True)
-    love_values = [payload["signs"][sign]["love"] for sign in payload["signs"]]
-    assert all("you are reminded" not in text.lower() for text in love_values)
-    assert all(sign.lower() not in payload["signs"][sign]["love"].lower() for sign in payload["signs"])
+    horoscope_values = [payload["signs"][sign]["horoscope"] for sign in payload["signs"]]
+    assert all("you are reminded" not in text.lower() for text in horoscope_values)
+    assert all(sign.lower() not in payload["signs"][sign]["horoscope"].lower() for sign in payload["signs"])
 
 
 def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:

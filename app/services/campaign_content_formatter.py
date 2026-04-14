@@ -94,7 +94,7 @@ WEATHER_AREA_LABELS = {
     "isole": "🏝️ ISOLE",
 }
 
-HOROSCOPE_SECTIONS = ["love", "work", "money", "energy", "friction", "advice"]
+HOROSCOPE_SECTIONS = ["horoscope"]
 WEATHER_AREAS = ["nord", "centro", "sud", "isole"]
 _SOURCE_TECHNICAL_LABELS = {"www", "xml", "xml2", "api", "rss", "feed"}
 _COMMON_TLDS = {"com", "it", "org", "net", "online", "news", "eu", "io", "tv", "co", "uk"}
@@ -1650,8 +1650,6 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
     if len(delicate) < 3:
         delicate = [name for name, _ in sorted(scored, key=lambda item: item[1])[:3]]
 
-    mood_parts = [str(signs.get(sign, {}).get("tone") or "").strip() for sign in SIGN_ORDER if signs.get(sign)]
-    mood = ", ".join(part for part in mood_parts[:4] if part) or "variegato"
     now_utc = _overview_now(payload)
     edition_label, daypart = news_edition_label_for_datetime(now_utc)
     greeting = NEWS_DAYPART_GREETING.get(daypart, NEWS_DAYPART_GREETING["pomeriggio"])
@@ -1672,7 +1670,6 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
 
     top_list = ", ".join(f"**{_sign_with_symbol(sign)}**" for sign in top) or "**n/d**"
     delicate_list = ", ".join(f"**{_sign_with_symbol(sign)}**" for sign in delicate) or "**n/d**"
-    sign_of_day = ranked[0][0] if ranked else "n/d"
     overview.add_field(
         name=format_standard_field_name("SEGNI IN FORMA", emoji="🤗"),
         value=f"• {top_list}",
@@ -1683,76 +1680,24 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         value=f"• {delicate_list}",
         inline=False,
     )
-    overview.add_field(
-        name=format_standard_field_name("SEGNO DEL GIORNO", emoji="🌟"),
-        value=(
-            f"• **{sign_of_day}**\n"
-            f"• Oggi ha il passo più brillante del gruppo e sfrutta bene le occasioni che passano: "
-            f"il clima resta **{mood}** ma qui si gioca con più ritmo. ✨"
-        ),
-        inline=False,
-    )
 
-    def _single_sentence(value: str, *, fallback: str) -> str:
-        cleaned = sanitize_plain_text(value)
+    def _single_bullet(value: str) -> str:
+        cleaned = sanitize_plain_text(sanitize_horoscope_text("", value))
+        cleaned = re.sub(r"^[\s\-\u2022]+", "", cleaned).strip()
         if not cleaned:
-            cleaned = fallback
-        parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
-        sentence = parts[0] if parts else fallback
-        sentence = trim_sentence_block(sentence, limit=150)
-        if not sentence.endswith((".", "!", "?")):
-            sentence = f"{sentence}."
-        return sentence
-
-    def _with_bold_focus(sentence: str, *, fallback_focus: str) -> str:
-        text = sanitize_plain_text(sentence)
-        if not text:
-            return f"**{fallback_focus}**."
-        parts = text.split()
-        if any("**" in part for part in parts):
-            return text
-        focus_len = 2 if len(parts) >= 6 else 1
-        head = " ".join(parts[:focus_len]).strip()
-        tail = " ".join(parts[focus_len:]).strip()
-        if not head:
-            return f"**{fallback_focus}**."
-        return f"**{head}** {tail}".strip()
+            cleaned = "giornata da gestire con **calma lucida**, scegliendo una priorità per volta 😵‍💫✨."
+        cleaned = re.sub(r"^[^\wÀ-ÿ]+", "", cleaned).strip()
+        if not cleaned.endswith((".", "!", "?")):
+            cleaned = f"{cleaned}."
+        return f"- {cleaned}"
 
     sign_fields: list[tuple[str, str]] = []
     for sign in SIGN_ORDER:
         if slugify_label(sign) not in selected_signs:
             continue
         data = signs.get(sign, {})
-        love_line = _with_bold_focus(
-            _single_sentence(sanitize_horoscope_text(sign, str(data.get("love") or "")), fallback="In amore ascolta di più e fai un passo gentile"),
-            fallback_focus="ascolta di più",
-        )
-        work_line = _with_bold_focus(
-            _single_sentence(sanitize_horoscope_text(sign, str(data.get("work") or "")), fallback="Sul lavoro punta alle priorità e chiudi una cosa per volta"),
-            fallback_focus="punta alle priorità",
-        )
-        money_line = _with_bold_focus(
-            _single_sentence(sanitize_horoscope_text(sign, str(data.get("money") or "")), fallback="Nei soldi evita gli slanci e tieni d'occhio il budget"),
-            fallback_focus="evita gli slanci",
-        )
-        energy_line = _with_bold_focus(
-            _single_sentence(sanitize_horoscope_text(sign, str(data.get("energy") or "")), fallback="Energia buona: dosala senza strafare"),
-            fallback_focus="buona",
-        )
-        summary = (
-            f"• ❤️: {love_line}\n"
-            f"• 💼: {work_line}\n"
-            f"• 💰: {money_line}\n"
-            f"• ⚡: {energy_line}"
-        )
+        summary = _single_bullet(str(data.get("horoscope") or ""))
         sign_fields.append((format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨")), summary[:1024]))
-    next_run_field = _next_horoscope_run_field(config, generated_at=now_utc)
-    if next_run_field:
-        overview.add_field(
-            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
-            value=next_run_field,
-            inline=False,
-        )
     embeds: list[discord.Embed] = [overview]
     if sign_fields:
         signs_title = f"🔮 {format_standard_title('OROSCOPO CRICETOSO • I SEGNI')}"
@@ -1771,6 +1716,14 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
             current = candidate
         if current.fields:
             embeds.append(current)
+    next_run_field = _next_horoscope_run_field(config, generated_at=now_utc)
+    if next_run_field:
+        target_embed = embeds[-1] if embeds else overview
+        target_embed.add_field(
+            name=format_standard_field_name("PROSSIMA EDIZIONE", emoji="🔜"),
+            value=next_run_field,
+            inline=False,
+        )
     return _apply_campaign_footer(embeds, service_name="campagne_oroscopo")
 
 
