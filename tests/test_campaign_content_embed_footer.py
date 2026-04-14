@@ -386,10 +386,27 @@ def test_campaign_service_resolve_model_uses_task_parameter_for_editorial() -> N
 def test_campaign_formatter_applies_footer_meta_in_all_builders() -> None:
     source = Path("app/services/campaign_content_formatter.py").read_text()
     assert 'def _apply_campaign_footer' in source
-    assert 'return _apply_campaign_footer([overview], service_name="campagne_notizie")' in source
-    assert 'return _apply_campaign_footer([overview], service_name="campagne_meteo")' in source
-    assert 'return _apply_campaign_footer([overview], service_name="campagne_oroscopo")' in source
-    assert 'return _apply_campaign_footer([embed], service_name=service_name)' in source
+    assert 'service_name="campagne_notizie"' in source
+    assert 'service_name="campagne_meteo"' in source
+    assert 'service_name="campagne_oroscopo"' in source
+    assert "_apply_campaign_footer(" in source
+
+    news = build_news_embeds(
+        {},
+        {"categories": {"cronaca": [{"title": "Titolo", "summary": "Sommario", "source": "ansa.it", "link": "https://example.com/news"}]}},
+    )
+    weather = build_weather_embeds(
+        {},
+        {"regions": {"Nord": {"sampled_cities": [{"city": "Milano", "temperature": 21, "windspeed": 8, "condition": "sereno"}]}}},
+    )
+    horoscope = build_horoscope_embeds(
+        {},
+        {"signs": {"Ariete": {"love": "ok", "work": "ok", "money": "ok", "energy": "ok", "friction": "ok", "advice": "ok", "confidence": 1}}},
+    )
+
+    assert {meta.service_name for meta in (get_footer_meta(embed) for embed in news) if meta is not None} == {"campagne_notizie"}
+    assert {meta.service_name for meta in (get_footer_meta(embed) for embed in weather) if meta is not None} == {"campagne_meteo"}
+    assert {meta.service_name for meta in (get_footer_meta(embed) for embed in horoscope) if meta is not None} == {"campagne_oroscopo"}
 
 
 def test_news_service_label_maps_to_campaigns_and_not_unknown() -> None:

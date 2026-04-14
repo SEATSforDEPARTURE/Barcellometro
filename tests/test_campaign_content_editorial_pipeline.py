@@ -401,10 +401,18 @@ def test_build_horoscope_embeds_paginate_signs_and_respect_embed_limits() -> Non
         },
     }
     embeds = build_horoscope_embeds({}, payload)
-    assert len(embeds) > 2
-    assert any(len(embed.fields) > 0 for embed in embeds[1:])
+    assert len(embeds) >= 2
+    assert embeds[0].title is not None
+    assert "OROSCOPO" in embeds[0].title.upper()
+    assert all(sign.upper() not in " ".join(field.name.upper() for field in embeds[0].fields) for sign in SIGN_ORDER)
+    assert any(
+        any(sign.upper() in field.name.upper() for sign in SIGN_ORDER for field in embed.fields)
+        for embed in embeds[1:]
+    )
     assert all(is_valid_embed(embed) for embed in embeds)
     assert all(len(embed) <= DISCORD_MAX_EMBED_TOTAL_CHARS for embed in embeds)
+    assert all(len(embed.fields) <= 25 for embed in embeds)
+    assert all(len(field.value or "") <= 1024 for embed in embeds for field in embed.fields)
 
 
 def test_build_horoscope_page_map_matches_embed_count() -> None:
