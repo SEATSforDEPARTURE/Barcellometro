@@ -515,6 +515,8 @@ def test_news_source_choices_match_supported_dropdown_values(messaggi_module) ->
         "agi",
         "adnkronos",
     ]
+    assert "ilpost" not in messaggi_module.NEWS_SOURCE_CHOICES
+    assert "fanpage" not in messaggi_module.NEWS_SOURCE_CHOICES
 
 def test_weather_sources_autocomplete_filters_and_excludes_selected(messaggi_module) -> None:
     choices = messaggi_module._compose_guided_csv_suggestions(

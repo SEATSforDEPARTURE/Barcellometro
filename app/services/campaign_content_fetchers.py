@@ -246,15 +246,18 @@ def _build_news_category_aliases() -> dict[str, str]:
 NEWS_SOURCE_ALIASES = _build_news_source_aliases()
 NEWS_CATEGORY_ALIASES = _build_news_category_aliases()
 LEGACY_NEWS_SOURCE_COMPAT = {
-    "ilpost": "agi",
-    "ilpost.it": "agi",
-    "www.ilpost.it": "agi",
-    "https://www.ilpost.it/feed/": "agi",
     "https://www.adnkronos.com/rss/2.0/ultimora.xml": "adnkronos",
-    "fanpage": "adnkronos",
-    "fanpage.it": "adnkronos",
-    "www.fanpage.it": "adnkronos",
-    "https://www.fanpage.it/feed/": "adnkronos",
+}
+
+UNSUPPORTED_LEGACY_NEWS_SOURCES = {
+    "ilpost",
+    "ilpost.it",
+    "www.ilpost.it",
+    "https://www.ilpost.it/feed/",
+    "fanpage",
+    "fanpage.it",
+    "www.fanpage.it",
+    "https://www.fanpage.it/feed/",
 }
 
 
@@ -545,6 +548,10 @@ def _normalize_source_tokens(sources: list[str], defaults: list[str]) -> list[st
 def _resolve_news_sources(sources: list[str]) -> list[str]:
     resolved: list[str] = []
     for token in _normalize_source_tokens(sources, DEFAULT_NEWS_SOURCES):
+        folded_token = _fold_token(token)
+        if token in UNSUPPORTED_LEGACY_NEWS_SOURCES or folded_token in UNSUPPORTED_LEGACY_NEWS_SOURCES:
+            logger.warning("news_source_legacy_unsupported_skipped source=%s", token)
+            continue
         canonical = normalize_news_source_token(token) or token
         mapped = NEWS_SOURCE_MAP.get(canonical)
         if mapped:
