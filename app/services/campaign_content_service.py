@@ -236,7 +236,7 @@ class CampaignContentService:
         else:
             self._apply_horoscope_italian_fallback(payload)
             logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using translated payload")
-        self._enforce_horoscope_diversity(payload)
+        logger.info("horoscope rewrite skipped, using translation only")
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
         logger.info("campaign content: horoscope build complete embeds=%s", len(embeds))
@@ -814,68 +814,22 @@ class CampaignContentService:
         return used_provider
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
-        if self._ai is None or not self._ai.is_enabled():
-            return None
-        used_model: str | None = None
-        model_name: str | None = None
-        get_model_cfg = getattr(self._ai, "get_model_config", None)
-        if callable(get_model_cfg):
-            configured_model = get_model_cfg("campaign_editorial")
-            if isinstance(configured_model, str) and configured_model.strip():
-                model_name = configured_model
         signs = payload.get("signs", {})
-        compact = {sign: {"horoscope": str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")} for sign, sign_payload in signs.items() if isinstance(sign_payload, dict)}
+        if not isinstance(signs, dict):
+            return None
+
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             if not isinstance(sign_payload, dict):
                 continue
-            source_text = str(compact.get(sign, {}).get("horoscope") or "")
-            if not source_text.strip():
-                logger.info("horoscope rewrite start sign=%s ai=false reason=empty_source", sign)
-                sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text)
-                logger.info("horoscope rewrite fallback sign=%s reason=empty_source", sign)
-                continue
-            logger.info("horoscope rewrite using llama sign=%s timeout=%.1fs", sign, _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS)
-            candidate = ""
-            try:
-                prompt = self._build_horoscope_sign_prompt(source_text)
-                candidate = await self._ai.ask_for_task(
-                    "campaign_editorial",
-                    prompt,
-                    "Assistente editoriale",
-                    timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
-                )
-            except TimeoutError:
-                logger.warning("campaign content: horoscope editorial timeout sign=%s timeout=%.1fs", sign, _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS)
-            except Exception as exc:
-                logger.warning("campaign content: horoscope editorial ask failed sign=%s (%s)", sign, exc.__class__.__name__)
 
-            rewritten = ""
-            if isinstance(candidate, str) and candidate.strip():
-                parsed_candidate = None
-                try:
-                    parsed_candidate = json.loads(candidate)
-                except Exception:
-                    parsed_candidate = None
-                if parsed_candidate is not None and model_name:
-                    used_model = used_model or model_name
-                cleaned_candidate = self._sanitize_editorial_text(candidate)
-                acceptable, reason = self._is_horoscope_output_acceptable(cleaned_candidate)
-                if not acceptable:
-                    logger.info("horoscope quality_guard rejected sign=%s reason=%s", sign, reason)
-                else:
-                    rewritten = self._postprocess_horoscope_text(sign, cleaned_candidate)
-            if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
-                sign_payload["horoscope"] = rewritten
-                if model_name:
-                    used_model = used_model or model_name
-                logger.info("horoscope rewrite done sign=%s ai=true", sign)
-                continue
-            sign_payload["horoscope"] = self._build_horoscope_local_fallback(sign, source_text, provider_available=True)
-            logger.info("horoscope rewrite fallback sign=%s reason=ai_unusable", sign)
+            source_text = str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")
+            cleaned = re.sub(r"\s+", " ", source_text).strip()
+            if cleaned:
+                cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+            sign_payload["horoscope"] = cleaned
 
-        self._enforce_horoscope_diversity(payload, original_signs=compact)
-        return used_model
+        return None
 
     @staticmethod
     def _looks_non_italian_or_mixed(text: str) -> bool:
