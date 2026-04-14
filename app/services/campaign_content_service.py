@@ -54,7 +54,7 @@ from app.services.scheduler_utils import ROME_TZ, calculate_next_wall_clock_run
 
 logger = logging.getLogger(__name__)
 _HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS = 3.0
-_HOROSCOPE_EDITORIAL_ENABLED = False
+_HOROSCOPE_EDITORIAL_ENABLED = True
 
 _NEWS_INPUT_META_RE = re.compile(
     r"(?im)\b(?:ecco una possibile versione in italiano|versione in italiano|in breve|riassunto|sintesi)\b[:\-\s]*"
@@ -202,6 +202,7 @@ class CampaignContentService:
             signs_fallback,
             bool(payload.get("fallback_used")),
         )
+        logger.info("horoscope rewrite enabled=%s", _HOROSCOPE_EDITORIAL_ENABLED)
         used_model: str | None = None
         if _HOROSCOPE_EDITORIAL_ENABLED:
             try:
@@ -210,8 +211,9 @@ class CampaignContentService:
                 logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing original payload", exc.__class__.__name__)
                 used_model = None
         else:
+            self._apply_horoscope_italian_fallback(payload)
             self._enforce_horoscope_diversity(payload)
-            logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using original payload")
+            logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using italianized payload")
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
         logger.info("campaign content: horoscope build complete embeds=%s", len(embeds))
@@ -260,6 +262,10 @@ class CampaignContentService:
         )
         apply_shared_footer_and_pagination(embeds, footer_text)
         embeds = enforce_embed_size_limit(embeds)
+        message_batches = split_embeds_for_discord_messages(embeds)
+        embeds = [embed for batch in message_batches for embed in batch]
+        logger.info("embeds after split=%s", len(embeds))
+        self._reapply_author_and_footer(embeds, footer_text=footer_text, service_name=footer_service_name)
         message_batches = split_embeds_for_discord_messages(embeds)
         embeds = [embed for batch in message_batches for embed in batch]
         if not embeds:
@@ -742,6 +748,7 @@ class CampaignContentService:
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
         if self._ai is None or not self._ai.is_enabled():
+            self._apply_horoscope_italian_fallback(payload)
             self._enforce_horoscope_diversity(payload)
             return None
         signs = payload.get("signs", {})
@@ -793,8 +800,48 @@ class CampaignContentService:
                     ai_applied = True
                 else:
                     sign_payload[key] = sanitize_horoscope_text(sign, str(sign_payload.get(key) or ""))
+        self._apply_horoscope_italian_fallback(payload)
         self._enforce_horoscope_diversity(payload)
         return self._resolve_ai_model_name("campaign_editorial") if ai_applied else None
+
+    def _reapply_author_and_footer(self, embeds: list[discord.Embed], *, footer_text: str, service_name: str) -> None:
+        total = len(embeds)
+        base_author = str(getattr(embeds[0].author, "name", "") or "").strip() if embeds else ""
+        if not base_author:
+            base_author = f"servizio {service_name.upper()}"
+        base_author = re.sub(r"\s*[•·]\s*Pagina\s+\d+/\d+\s*$", "", base_author, flags=re.IGNORECASE).strip()
+        for page_index, embed in enumerate(embeds, start=1):
+            author_name = base_author
+            if total > 1:
+                author_name = f"{base_author} • Pagina {page_index}/{total}"
+            icon_url = getattr(embed.author, "icon_url", None)
+            url = getattr(embed.author, "url", None)
+            embed.set_author(name=author_name, icon_url=icon_url, url=url)
+            embed.set_footer(text=footer_text)
+
+    def _apply_horoscope_italian_fallback(self, payload: dict[str, Any]) -> None:
+        signs = payload.get("signs")
+        if not isinstance(signs, dict):
+            return
+        section_fallbacks = {
+            "love": "In amore ascolta di più e fai un passo gentile.",
+            "work": "Sul lavoro punta alle priorità e chiudi una cosa per volta.",
+            "money": "Nei soldi evita gli slanci e tieni d'occhio il budget.",
+            "energy": "Energia buona: dosala senza strafare.",
+            "friction": "Piccoli attriti gestibili con calma e pazienza.",
+            "advice": "Consiglio cricetoso: procedi leggero ma con metodo.",
+        }
+        for sign, sign_payload in signs.items():
+            if not isinstance(sign_payload, dict):
+                continue
+            for section in HOROSCOPE_SECTIONS:
+                text = str(sign_payload.get(section) or "").strip()
+                if not text:
+                    continue
+                if self._looks_italian_text(text):
+                    sign_payload[section] = sanitize_horoscope_text(sign, text)
+                    continue
+                sign_payload[section] = sanitize_horoscope_text(sign, section_fallbacks.get(section, "Oggi tieni ritmo e misura."))
 
     @staticmethod
     def _simple_similarity(a: str, b: str) -> float:

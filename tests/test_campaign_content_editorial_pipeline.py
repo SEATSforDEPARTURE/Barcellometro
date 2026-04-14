@@ -960,7 +960,7 @@ def test_horoscope_publish_continues_when_editorial_ai_fails() -> None:
     asyncio.run(_run())
 
 
-def test_horoscope_service_bypasses_editorial_ai_and_reaches_publish_store() -> None:
+def test_horoscope_service_uses_editorial_ai_and_reaches_publish_store() -> None:
     class _Channel(discord.abc.Messageable):
         def __init__(self) -> None:
             self.send = AsyncMock(return_value=SimpleNamespace(id=654))
@@ -977,7 +977,18 @@ def test_horoscope_service_bypasses_editorial_ai_and_reaches_publish_store() -> 
 
     class _Ai:
         def __init__(self) -> None:
-            self.ask_for_task = AsyncMock(side_effect=TimeoutError("must not be awaited for horoscope"))
+            rewritten = {
+                sign: {
+                    "love": "Cuore in italiano",
+                    "work": "Scrivania in italiano",
+                    "money": "Portafoglio in italiano",
+                    "energy": "Batteria in italiano",
+                    "friction": "Attrito in italiano",
+                    "advice": "Consiglio in italiano",
+                }
+                for sign in SIGN_ORDER
+            }
+            self.ask_for_task = AsyncMock(return_value=json.dumps(rewritten, ensure_ascii=False))
 
         def is_enabled(self):
             return True
@@ -994,7 +1005,7 @@ def test_horoscope_service_bypasses_editorial_ai_and_reaches_publish_store() -> 
         with patch("app.services.campaign_content_service.fetch_horoscope_content_async", AsyncMock(return_value=payload)):
             await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
 
-        ai.ask_for_task.assert_not_awaited()
+        ai.ask_for_task.assert_awaited_once()
         bot.channel.send.assert_awaited_once()
         db.upsert_campaign_content_message.assert_awaited_once()
 
@@ -1016,7 +1027,83 @@ def test_invalid_editorial_json_does_not_fail_horoscope_publish() -> None:
         service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
         used_model = await service._rewrite_horoscope_payload(payload)
         assert used_model is None
-        assert payload["signs"]["Ariete"]["love"] == "orig"
+        assert payload["signs"]["Ariete"]["love"] != "orig"
+        assert "amore" in payload["signs"]["Ariete"]["love"].lower()
+
+    asyncio.run(_run())
+
+
+def test_send_and_store_reapplies_author_pagination_and_identical_footer_after_split() -> None:
+    class _Db:
+        async def upsert_campaign_content_message(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def update_campaign_content_next_run(self, **kwargs):
+            self.next_kwargs = kwargs
+
+    class _Channel(discord.abc.Messageable):
+        def __init__(self) -> None:
+            self.sent_batches: list[list[discord.Embed]] = []
+
+        async def _get_channel(self):
+            return self
+
+        async def send(self, *args, **kwargs):
+            embeds = kwargs.get("embeds") or []
+            self.sent_batches.append(list(embeds))
+            return SimpleNamespace(id=999 + len(self.sent_batches))
+
+    channel = _Channel()
+
+    class _Bot:
+        def get_channel(self, _id):
+            return channel
+
+    async def _run() -> None:
+        db = _Db()
+        service = CampaignContentService(database=db, bot=_Bot(), ai_service=None)
+        config = {"guild_id": "1", "channel_id": "2", "id": 101, "interval_minutes": 60}
+        embed_one = discord.Embed(title="Overview", description="A" * 3500)
+        embed_one.set_author(name="servizio CAMPAIGNS")
+        embed_two = discord.Embed(title="Segni", description="B" * 3500)
+        embed_two.set_author(name="servizio CAMPAIGNS")
+        await service._send_and_store(
+            config,
+            [embed_one, embed_two],
+            "HOROSCOPE",
+            configured_sources=["ohmanda"],
+            used_sources=["ohmanda"],
+            used_model=None,
+            fallback_used=False,
+            payload={},
+        )
+        flattened = [embed for batch in channel.sent_batches for embed in batch]
+        assert len(flattened) >= 2
+        expected_total = len(flattened)
+        footer = flattened[0].footer.text
+        for idx, embed in enumerate(flattened, start=1):
+            assert embed.footer.text == footer
+            assert embed.author.name.endswith(f"Pagina {idx}/{expected_total}")
+        persisted = [discord.Embed.from_dict(item) for item in json.loads(db.kwargs["embeds_json"])]
+        assert all((item.footer.text or "") == footer for item in persisted)
+
+    asyncio.run(_run())
+
+
+def test_horoscope_rewrite_fallback_italianizes_english_sections() -> None:
+    class _Ai:
+        def is_enabled(self):
+            return True
+
+        async def ask_for_task(self, *args, **kwargs):
+            return "not-json"
+
+    async def _run() -> None:
+        payload = {"signs": {sign: {section: "You are reminded to stay calm today." for section in ["love", "work", "money", "energy", "friction", "advice"]} for sign in SIGN_ORDER}}
+        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
+        await service._rewrite_horoscope_payload(payload)
+        assert all("You are reminded" not in payload["signs"][sign]["love"] for sign in SIGN_ORDER)
+        assert all("amore" in payload["signs"][sign]["love"].lower() for sign in SIGN_ORDER)
 
     asyncio.run(_run())
 
