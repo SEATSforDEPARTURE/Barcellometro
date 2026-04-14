@@ -29,22 +29,10 @@ NEWS_SOURCE_CATALOG = [
         "aliases": ["repubblica", "repubblica.it", "www.repubblica.it"],
     },
     {
-        "value": "ilpost",
-        "label": "ilpost.it",
-        "url": "https://www.ilpost.it/feed/",
-        "aliases": ["ilpost", "ilpost.it", "www.ilpost.it"],
-    },
-    {
         "value": "open",
         "label": "open.online",
         "url": "https://www.open.online/feed/",
         "aliases": ["open", "open.online", "www.open.online"],
-    },
-    {
-        "value": "fanpage",
-        "label": "fanpage.it",
-        "url": "https://www.fanpage.it/feed/",
-        "aliases": ["fanpage", "fanpage.it", "www.fanpage.it"],
     },
     {
         "value": "wired",
@@ -57,6 +45,18 @@ NEWS_SOURCE_CATALOG = [
         "label": "corriere.it",
         "url": "https://xml2.corriereobjects.it/rss/homepage.xml",
         "aliases": ["corriere", "corriere.it", "www.corriere.it"],
+    },
+    {
+        "value": "agi",
+        "label": "agi.it",
+        "url": "https://www.agi.it/cronaca/rss",
+        "aliases": ["agi", "agi.it", "www.agi.it"],
+    },
+    {
+        "value": "adnkronos",
+        "label": "adnkronos.com",
+        "url": "https://www.adnkronos.com/rss/2.0/Ultimora.xml",
+        "aliases": ["adnkronos", "adnkronos.com", "www.adnkronos.com"],
     },
 ]
 
@@ -245,6 +245,16 @@ def _build_news_category_aliases() -> dict[str, str]:
 
 NEWS_SOURCE_ALIASES = _build_news_source_aliases()
 NEWS_CATEGORY_ALIASES = _build_news_category_aliases()
+LEGACY_NEWS_SOURCE_COMPAT = {
+    "ilpost": "agi",
+    "ilpost.it": "agi",
+    "www.ilpost.it": "agi",
+    "https://www.ilpost.it/feed/": "agi",
+    "fanpage": "adnkronos",
+    "fanpage.it": "adnkronos",
+    "www.fanpage.it": "adnkronos",
+    "https://www.fanpage.it/feed/": "adnkronos",
+}
 
 
 def normalize_news_source_token(value: str) -> str | None:
@@ -254,6 +264,9 @@ def normalize_news_source_token(value: str) -> str | None:
     direct = NEWS_SOURCE_ALIASES.get(token) or NEWS_SOURCE_ALIASES.get(_fold_token(token))
     if direct:
         return direct
+    legacy = LEGACY_NEWS_SOURCE_COMPAT.get(token) or LEGACY_NEWS_SOURCE_COMPAT.get(_fold_token(token))
+    if legacy:
+        return legacy
     if token.startswith(("http://", "https://")):
         parsed = urllib.parse.urlparse(token)
         host = parsed.netloc.strip().lower()
@@ -599,7 +612,7 @@ def _parse_published_at(value: str | None) -> datetime | None:
 
 def _item_quality(item: dict[str, Any]) -> tuple[float, int, int]:
     source = (item.get("source") or "").lower()
-    reliability_bonus = 2 if any(k in source for k in ["ansa", "repubblica", "corriere", "ilpost"]) else 0
+    reliability_bonus = 2 if any(k in source for k in ["ansa", "repubblica", "corriere", "agi", "adnkronos"]) else 0
     published = _parse_published_at(str(item.get("published_at") or "")) or datetime(1970, 1, 1, tzinfo=timezone.utc)
     return (published.timestamp(), len(item.get("summary") or ""), reliability_bonus)
 
