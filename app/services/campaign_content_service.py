@@ -99,6 +99,8 @@ _HOROSCOPE_ITALIAN_STRUCTURAL_MARKERS = {
     "oggi", "con", "per", "non", "una", "uno", "del", "della", "delle", "sul", "nel", "tra",
     "mentre", "quindi", "ma", "poi", "anche", "resta", "scegli", "evita", "chiudi", "parla",
 }
+_HOROSCOPE_SUSPECT_NON_ITALIAN_TOKEN_RE = re.compile(r"\b[A-Z][a-z]{2,}s\b")
+_HOROSCOPE_LONG_JOINED_TOKEN_RE = re.compile(r"\b[a-zàèéìòù]{16,}\b", flags=re.IGNORECASE)
 
 
 class CampaignContentService:
@@ -796,7 +798,13 @@ class CampaignContentService:
             except Exception as exc:
                 logger.warning("campaign content: horoscope editorial ask failed sign=%s (%s)", sign, exc.__class__.__name__)
 
-            rewritten = self._postprocess_horoscope_text(sign, candidate) if isinstance(candidate, str) and candidate.strip() else ""
+            rewritten = ""
+            if isinstance(candidate, str) and candidate.strip():
+                cleaned_candidate = self._sanitize_editorial_text(candidate)
+                if self._is_horoscope_ai_output_invalid(cleaned_candidate):
+                    logger.info("horoscope rewrite fallback sign=%s reason=ai_quality_guard", sign)
+                else:
+                    rewritten = self._postprocess_horoscope_text(sign, cleaned_candidate)
             if rewritten and self._is_horoscope_text_acceptable(rewritten, source_text):
                 sign_payload["horoscope"] = rewritten
                 ai_applied = True
@@ -868,11 +876,9 @@ class CampaignContentService:
 
     def _build_horoscope_local_fallback(self, sign: str, source_text: str, *, provider_available: bool = True) -> str:
         normalized = self._normalize_horoscope_section_text(sign, "horoscope", source_text)
-        if not normalized:
-            base = "Oggi vai di **priorità furba**: meno caos, più risultato e zero drammi."
-            return self._append_horoscope_emoji(base, sign=sign)
-        localized = self._fallback_short_horoscope_translation(normalized if provider_available else source_text)
-        return self._append_horoscope_emoji(self._postprocess_horoscope_text(sign, localized, with_emoji=False), sign=sign)
+        source = normalized if provider_available else source_text
+        fallback = self._build_brief_horoscope_fallback(source)
+        return self._append_horoscope_emoji(self._postprocess_horoscope_text(sign, fallback, with_emoji=False), sign=sign)
 
     def _apply_horoscope_local_fallback(self, payload: dict[str, Any]) -> None:
         signs = payload.get("signs")
@@ -981,13 +987,10 @@ class CampaignContentService:
     @staticmethod
     def _build_horoscope_sign_prompt(horoscope: str) -> str:
         return (
-            "Traduci e RISCRIVI questo oroscopo in italiano in massimo 2 frasi.\n"
-            "Tono: simpatico, leggermente trash, semplice, stile oroscopo divertente.\n"
-            "Non usare inglese.\n"
-            "Non fare elenchi.\n"
-            "Non superare 2 frasi.\n"
-            "Metti 1 emoji alla fine coerente con il messaggio.\n"
-            "Metti in **grassetto** le parole importanti.\n\n"
+            "Riscrivi questo oroscopo in italiano corretto e naturale.\n"
+            "Massimo 2 frasi.\n"
+            "Niente inglese.\n"
+            "Tono semplice e scorrevole.\n\n"
             "Testo:\n"
             f"{horoscope}"
         )
@@ -1009,14 +1012,68 @@ class CampaignContentService:
         translated = self._content_preserving_localize_section("horoscope", clipped)
         return translated or clipped
 
+    def _build_brief_horoscope_fallback(self, text: str) -> str:
+        lowered = f" {str(text or '').lower()} "
+        if any(token in lowered for token in ("amore", "cuore", "messaggio", "dialog", "love", "romance")):
+            return "Oggi chiarisci con calma: una parola giusta sistema più di mille messaggi. Tieni il tono leggero."
+        if any(token in lowered for token in ("soldi", "spese", "budget", "money", "subscription")):
+            return "Occhio alle spese impulsive: meglio una scelta piccola ma furba. Conta fino a tre prima di decidere."
+        if any(token in lowered for token in ("lavoro", "focus", "task", "deadline", "bugfix", "work", "career")):
+            return "Tieni il focus su una priorità concreta e chiudi il cerchio senza correre. Il resto può aspettare."
+        if any(token in lowered for token in ("calma", "prudenza", "stanco", "fatica", "careful")):
+            return "Rallenta il ritmo e scegli mosse semplici. Con pazienza eviti attriti inutili."
+        return "Giornata lineare: meno caos, più ordine e una scelta fatta bene."
+
+    @staticmethod
+    def _fix_horoscope_joined_words(text: str) -> str:
+        cleaned = str(text or "")
+        joints = (
+            ("sei", "una"),
+            ("sei", "uno"),
+            ("oggi", "con"),
+            ("oggi", "non"),
+            ("non", "è"),
+            ("con", "una"),
+            ("con", "il"),
+            ("per", "una"),
+            ("per", "il"),
+        )
+        for first, second in joints:
+            cleaned = re.sub(rf"(?i)\b{first}{second}\b", f"{first} {second}", cleaned)
+        return cleaned
+
+    @staticmethod
+    def _strip_horoscope_english_residuals(text: str) -> str:
+        cleaned = str(text or "")
+        for token in sorted(_HOROSCOPE_ENGLISH_MARKERS, key=len, reverse=True):
+            cleaned = re.sub(rf"(?i)\b{re.escape(token)}\b", " ", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def _normalize_sentence_case(text: str) -> str:
+        sentences = CampaignContentService._split_sentences(text)
+        if not sentences:
+            return text
+        normalized: list[str] = []
+        for sentence in sentences[:2]:
+            s = sentence.strip()
+            if not s:
+                continue
+            normalized.append(s[0].upper() + s[1:] if len(s) > 1 else s.upper())
+        return " ".join(normalized).strip()
+
     def _postprocess_horoscope_text(self, sign: str, text: str, *, with_emoji: bool = True) -> str:
         cleaned = self._normalize_horoscope_section_text(sign, "horoscope", text)
+        cleaned = self._fix_horoscope_joined_words(cleaned)
+        cleaned = self._strip_horoscope_english_residuals(cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         cleaned = _NEWS_EMOJI_RE.sub("", cleaned).strip()
         cleaned = re.sub(r"^[^\wÀ-ÿ]+", "", cleaned).strip()
         sentences = self._split_sentences(cleaned)
         if sentences:
             cleaned = " ".join(sentences[:2]).strip()
+        cleaned = self._normalize_sentence_case(cleaned)
         if len(cleaned) > 300:
             clipped = cleaned[:300].rstrip()
             cut = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
@@ -1055,6 +1112,8 @@ class CampaignContentService:
 
     def _is_horoscope_text_acceptable(self, candidate: str, source_text: str) -> bool:
         cleaned = self._normalize_horoscope_section_text("", "horoscope", candidate)
+        if self._is_horoscope_ai_output_invalid(cleaned):
+            return False
         if self._looks_non_italian_or_mixed(cleaned):
             return False
         words = re.findall(r"[a-zàèéìòù']+", cleaned.lower())
@@ -1063,6 +1122,20 @@ class CampaignContentService:
             return False
         similarity = SequenceMatcher(a=cleaned.lower(), b=str(source_text or "").lower()).ratio()
         return similarity < 0.93
+
+    def _is_horoscope_ai_output_invalid(self, text: str) -> bool:
+        raw = str(text or "").strip()
+        if not raw:
+            return True
+        if _HOROSCOPE_SUSPECT_NON_ITALIAN_TOKEN_RE.search(raw):
+            return True
+        if not re.search(r"\s", raw) or _HOROSCOPE_LONG_JOINED_TOKEN_RE.search(raw):
+            return True
+        lowered = f" {raw.lower()} "
+        english_hits = sum(1 for marker in _HOROSCOPE_ENGLISH_MARKERS if f" {marker} " in lowered)
+        if english_hits >= 2:
+            return True
+        return False
 
     def _normalize_horoscope_section_text(self, sign: str, section: str, text: str) -> str:
         cleaned = sanitize_horoscope_text(sign, str(text or ""))
