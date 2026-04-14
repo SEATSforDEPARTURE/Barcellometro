@@ -18,6 +18,7 @@ from app.services.campaign_content_formatter import (
     build_news_page_map,
     news_edition_label_for_datetime,
     build_weather_embeds,
+    build_weather_page_map,
     sanitize_public_news_text,
 )
 from app.services.campaign_content_service import CampaignContentService
@@ -54,8 +55,9 @@ def test_weather_embeds_keep_clean_titles_and_shared_footer() -> None:
         },
     )
 
-    assert len(embeds) == 1
-    assert "METEO ITALIA • EDIZIONE" in _title_inner_without_emoji(embeds[0].title or "")
+    assert len(embeds) == 2
+    assert _title_inner_without_emoji(embeds[0].title or "") == "METEO CRICETOSO • PANORAMICA"
+    assert _title_inner_without_emoji(embeds[1].title or "") == "METEO CRICETOSO • LE AREE"
     footer_meta = [get_footer_meta(embed) for embed in embeds]
     assert all(meta is not None for meta in footer_meta)
     assert {meta.service_name for meta in footer_meta if meta is not None} == {"campagne_meteo"}
@@ -379,7 +381,7 @@ def test_horoscope_local_fallback_force_override_translates_without_readding_sig
 
 
 def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
-    weather = build_weather_embeds(
+    weather_pages = build_weather_embeds(
         {"next_scheduled_run_at": "2026-04-09T17:30:00+00:00"},
         {
             "generated_at": "2026-04-09T14:30:00+00:00",
@@ -390,16 +392,39 @@ def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
                 "Isole": {"sampled_cities": [{"city": "Palermo", "temperature": 18.1, "windspeed": 11.0, "condition": "variabile"}]},
             },
         },
-    )[0]
-    field_map = {field.name: field.value or "" for field in weather.fields}
-    assert field_map["🌩️ __**AREA PIÙ INSTABILE**__"].startswith("• **")
-    assert field_map["🌤️ __**AREA PIÙ SERENA**__"].startswith("• **")
-    assert field_map["🌡️ __**RANGE TERMICO**__"].startswith("• **")
-    assert field_map["📍 __**NORD**__"].splitlines()[0].startswith("• ")
-    assert "• **Milano** · **14.2°C** · vento **10.6 km/h** · rovesci" in field_map["📍 __**NORD**__"]
-    assert "• **Focus area:**" in field_map["📍 __**NORD**__"]
-    assert field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("• Il criceto chiude il taccuino meteo per ora.")
-    assert "• Ci rivediamo alle **19:30** con la prossima edizione." in field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+    )
+    assert len(weather_pages) == 2
+    overview_field_map = {field.name: field.value or "" for field in weather_pages[0].fields}
+    details_field_map = {field.name: field.value or "" for field in weather_pages[1].fields}
+    detail_names = [field.name for field in weather_pages[1].fields]
+
+    assert weather_pages[0].title == "🌦️ __**METEO CRICETOSO • PANORAMICA**__"
+    assert weather_pages[1].title == "🌦️ __**METEO CRICETOSO • LE AREE**__"
+    assert (weather_pages[1].description or "").startswith("*Vediamo nel dettaglio le zone climatiche...*")
+    assert set(overview_field_map) == {
+        "🌩️ __**AREA PIÙ INSTABILE**__",
+        "🌤️ __**AREA PIÙ SERENA**__",
+    }
+    assert overview_field_map["🌩️ __**AREA PIÙ INSTABILE**__"].startswith("• **")
+    assert overview_field_map["🌤️ __**AREA PIÙ SERENA**__"].startswith("• **")
+    assert "🌡️ __**RANGE TERMICO**__" not in overview_field_map
+    assert details_field_map["📍 __**NORD**__"].splitlines()[0].startswith("• ")
+    assert "• **Milano** · **14.2°C** · vento **10.6 km/h** · rovesci" in details_field_map["📍 __**NORD**__"]
+    assert "• **Focus area:**" in details_field_map["📍 __**NORD**__"]
+    assert detail_names[-2] == "🌡️ __**RANGE TERMICO**__"
+    assert detail_names[-1] == "🔜 __**PROSSIMA EDIZIONE**__"
+    assert details_field_map["🌡️ __**RANGE TERMICO**__"].startswith("• **")
+    assert details_field_map["🔜 __**PROSSIMA EDIZIONE**__"].startswith("• Il criceto chiude il taccuino meteo per ora.")
+    assert "• Ci rivediamo alle **19:30** con la prossima edizione." in details_field_map["🔜 __**PROSSIMA EDIZIONE**__"]
+
+
+def test_weather_page_map_tracks_area_pages() -> None:
+    assert build_weather_page_map(1) == [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
+    assert build_weather_page_map(3) == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "areas", "key": "areas_1", "label": "Aree · Pagina 1", "page": 1},
+        {"type": "areas", "key": "areas_2", "label": "Aree · Pagina 2", "page": 2},
+    ]
 
 
 def test_campaign_service_footer_pipeline_tracks_sources_model_and_metadata_fields() -> None:

@@ -25,6 +25,7 @@ from app.services.campaign_content_formatter import (
     build_horoscope_page_map,
     build_news_embeds,
     build_news_page_map,
+    build_weather_page_map,
     enforce_embed_size_limit,
     news_edition_label_for_datetime,
     build_weather_embeds,
@@ -64,16 +65,20 @@ def test_build_weather_embeds_page_order() -> None:
         {"regions": {"Nord": {"sampled_cities": []}, "Centro": {"sampled_cities": []}, "Sud": {"sampled_cities": []}, "Isole": {"sampled_cities": []}}},
     )
     titles = [_normalize_standardized_title(e.title) for e in embeds]
-    assert "METEO ITALIA • EDIZIONE" in titles[0]
-    assert len(embeds) == 1
+    assert titles[0] == "🌦️ __**METEO CRICETOSO • PANORAMICA**__"
+    assert titles[1] == "🌦️ __**METEO CRICETOSO • LE AREE**__"
+    assert len(embeds) == 2
     names = [field.name for field in embeds[0].fields]
+    detail_names = [field.name for field in embeds[1].fields]
     assert "🌩️ __**AREA PIÙ INSTABILE**__" in names
     assert "🌤️ __**AREA PIÙ SERENA**__" in names
-    assert "🌡️ __**RANGE TERMICO**__" in names
-    assert any("NORD" in name for name in names)
-    assert any("CENTRO" in name for name in names)
-    assert any("SUD" in name for name in names)
-    assert any("ISOLE" in name for name in names)
+    assert "🌡️ __**RANGE TERMICO**__" not in names
+    assert all("NORD" not in name for name in names)
+    assert any("NORD" in name for name in detail_names)
+    assert any("CENTRO" in name for name in detail_names)
+    assert any("SUD" in name for name in detail_names)
+    assert any("ISOLE" in name for name in detail_names)
+    assert detail_names[-1] == "🌡️ __**RANGE TERMICO**__"
     assert all("SUD E ISOLE" not in name for name in names)
 
 
@@ -87,15 +92,22 @@ def test_weather_embed_renders_sud_and_isole_as_distinct_fields_when_both_select
             }
         },
     )
-    names = [field.name for field in embeds[0].fields]
+    names = [field.name for field in embeds[1].fields]
     assert any("SUD" in name for name in names)
     assert any("ISOLE" in name for name in names)
     assert all("SUD E ISOLE" not in name for name in names)
-    field_map = {field.name: field.value or "" for field in embeds[0].fields}
+    field_map = {field.name: field.value or "" for field in embeds[1].fields}
     assert field_map["📍 __**SUD**__"].splitlines()[0].startswith("• ")
     assert not field_map["📍 __**SUD**__"].splitlines()[0].startswith("• 🐹")
     assert "• **Napoli** · **27°C** · vento **8 km/h** · sereno" in field_map["📍 __**SUD**__"]
     assert "• **Focus area:**" in field_map["📍 __**SUD**__"]
+
+
+def test_weather_page_map_matches_total_pages() -> None:
+    assert build_weather_page_map(2) == [
+        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
+        {"type": "areas", "key": "areas_1", "label": "Aree · Pagina 1", "page": 1},
+    ]
 
 
 def test_build_news_embeds_respects_config_order_and_dedupes() -> None:

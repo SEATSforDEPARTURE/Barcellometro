@@ -1388,7 +1388,7 @@ class CampaignContentService:
         if service_type == "NEWS":
             return build_news_page_map(payload or {}, len(payload_embeds))
         if service_type == "WEATHER":
-            return build_weather_page_map()
+            return build_weather_page_map(len(payload_embeds))
         if service_type == "HOROSCOPE":
             return build_horoscope_page_map(len(payload_embeds))
         return [{"type": "overview", "key": "overview", "label": "Inizio", "page": 0}]
