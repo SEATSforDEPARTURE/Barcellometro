@@ -156,29 +156,17 @@ def test_execute_horoscope_service_uses_async_fetch_path() -> None:
     asyncio.run(_run())
 
 
-def test_horoscope_translation_layer_prefers_opus_and_falls_back_to_argos() -> None:
-    class _Translator:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, str]] = []
-
-        async def translate(self, text: str, target_lang: str, *, source_lang: str | None = None, backend: str | None = None):
-            _ = source_lang
-            self.calls.append((text, str(backend)))
-            if backend == "opusmt":
-                raise RuntimeError("missing model")
-            return SimpleNamespace(text=f"it::{text}", model="argos")
-
-    service = CampaignContentService(
-        database=SimpleNamespace(),
-        bot=SimpleNamespace(),
-        ai_service=None,
-        translate_service=_Translator(),
-    )
+def test_horoscope_rewrite_uses_local_translation_and_cleans_english_residuals() -> None:
+    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
     payload = {"signs": {"Ariete": {"horoscope": "Today focus on one task."}}}
 
     async def _run() -> None:
-        provider = await service._translate_horoscope_payload(payload)
-        assert provider == "Argos"
-        assert payload["signs"]["Ariete"]["translated_horoscope"].startswith("it::")
+        with patch(
+            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
+            AsyncMock(return_value=SimpleNamespace(text="You are reminded to stay calm today.")),
+        ):
+            await service._rewrite_horoscope_payload(payload)
+        assert payload["signs"]["Ariete"]["horoscope"]
+        assert "you are" not in payload["signs"]["Ariete"]["horoscope"].lower()
 
     asyncio.run(_run())
