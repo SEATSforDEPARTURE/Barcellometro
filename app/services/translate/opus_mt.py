@@ -8,7 +8,7 @@ from app.services.translate.base import TranslationResult
 
 
 class OpusMtTranslateService:
-    MODEL_ID = "Helsinki-NLP/opus-mt-tc-big-en-it"
+    MODEL_ID = "Helsinki-NLP/opus-mt-en-it"
 
     _pipeline: Any = None
     _load_error: Exception | None = None
@@ -51,7 +51,7 @@ class OpusMtTranslateService:
 
         def _run_translate() -> TranslationResult:
             model_pipeline = self._get_pipeline()
-            outputs = model_pipeline(text)
+            outputs = model_pipeline(str(text or ""))
             if not outputs:
                 raise RuntimeError("OPUS-MT returned empty output")
             translated = str(outputs[0].get("translation_text") or "").strip()
@@ -62,7 +62,7 @@ class OpusMtTranslateService:
                 source_lang="en",
                 target_lang="it",
                 backend="local",
-                model="opus-mt-tc-big-en-it",
+                model="opus-mt-en-it",
             )
 
         return await asyncio.to_thread(_run_translate)
