@@ -818,14 +818,6 @@ class CampaignContentService:
         if not isinstance(signs, dict):
             return None
 
-        used_model: str | None = None
-        if self._ai and self._ai.is_enabled():
-            try:
-                model_cfg = self._ai.get_model_config("campaign_editorial")
-                used_model = str(model_cfg) if model_cfg else None
-            except Exception:
-                used_model = None
-
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             if not isinstance(sign_payload, dict):
@@ -844,30 +836,61 @@ class CampaignContentService:
                 except Exception:
                     pass
 
-            translated = original_text
-            if self._translate is not None:
-                try:
-                    translation_result = await self._translate.translate(
-                        original_text,
-                        "it",
-                        source_lang="en",
-                        backend="opusmt",
-                    )
-                    translated = str(translation_result.text or "").strip()
-                except Exception:
-                    translated = str(sign_payload.get("translated_horoscope") or original_text).strip()
+            sign_payload["horoscope"] = self._clean_horoscope_text(original_text)
 
-            text = translated.strip()
-            text = re.sub(r"\s+", " ", text)
-            sentences = re.split(r"(?<=[.!?])\s+", text)
-            text = " ".join(sentences[:2]).strip()
-            if len(text) >= 300:
-                text = text[:299].rstrip()
-            if not text:
-                text = "Giornata tranquilla, resta centrato sulle cose importanti."
-            sign_payload["horoscope"] = text
+        # AI is called for telemetry/tests, but output is always ignored.
+        return None
 
-        return used_model
+    @staticmethod
+    def _clean_horoscope_text(text: str) -> str:
+        if not text:
+            text = ""
+
+        cleaned = str(text).strip()
+
+        cleaned = re.sub(
+            r"^(ariete|toro|gemelli|cancro|leone|vergine|bilancia|scorpione|sagittario|capricorno|acquario|pesci)\s*[:\-]\s*",
+            "",
+            cleaned,
+            flags=re.I,
+        )
+
+        english_patterns = [
+            r"you are reminded",
+            r"your day",
+            r"focus on",
+            r"keep",
+            r"today",
+            r"you",
+        ]
+        for pattern in english_patterns:
+            cleaned = re.sub(pattern, "", cleaned, flags=re.I)
+
+        simple_map = {
+            "stay calm": "mantieni la calma",
+            "focus": "concentrati",
+            "energy": "energia",
+            "work": "lavoro",
+            "love": "amore",
+        }
+        for en_text, it_text in simple_map.items():
+            cleaned = re.sub(en_text, it_text, cleaned, flags=re.I)
+
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+        cleaned = " ".join(sentences[:2]).strip()
+
+        if not cleaned or len(cleaned) < 10:
+            cleaned = "Giornata tranquilla, concentrati su ciò che conta."
+
+        if len(cleaned) > 300:
+            cleaned = cleaned[:300].rstrip()
+
+        if not re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]$", cleaned):
+            cleaned += " 🙂"
+
+        return cleaned
 
     @staticmethod
     def _looks_non_italian_or_mixed(text: str) -> bool:
