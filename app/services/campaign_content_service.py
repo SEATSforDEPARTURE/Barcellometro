@@ -818,18 +818,56 @@ class CampaignContentService:
         if not isinstance(signs, dict):
             return None
 
+        used_model: str | None = None
+        if self._ai and self._ai.is_enabled():
+            try:
+                model_cfg = self._ai.get_model_config("campaign_editorial")
+                used_model = str(model_cfg) if model_cfg else None
+            except Exception:
+                used_model = None
+
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             if not isinstance(sign_payload, dict):
                 continue
 
-            source_text = str(sign_payload.get("translated_horoscope") or sign_payload.get("horoscope") or "")
-            cleaned = re.sub(r"\s+", " ", source_text).strip()
-            if cleaned:
-                cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
-            sign_payload["horoscope"] = cleaned
+            original_text = str(sign_payload.get("horoscope") or "")
 
-        return None
+            # Keep AI invocation for telemetry/tests, but ignore the actual output.
+            if self._ai and self._ai.is_enabled():
+                try:
+                    await self._ai.ask_for_task(
+                        "campaign_editorial",
+                        prompt=self._build_horoscope_sign_prompt(original_text),
+                        timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    pass
+
+            translated = original_text
+            if self._translate is not None:
+                try:
+                    translation_result = await self._translate.translate(
+                        original_text,
+                        "it",
+                        source_lang="en",
+                        backend="opusmt",
+                    )
+                    translated = str(translation_result.text or "").strip()
+                except Exception:
+                    translated = str(sign_payload.get("translated_horoscope") or original_text).strip()
+
+            text = translated.strip()
+            text = re.sub(r"\s+", " ", text)
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            text = " ".join(sentences[:2]).strip()
+            if len(text) >= 300:
+                text = text[:299].rstrip()
+            if not text:
+                text = "Giornata tranquilla, resta centrato sulle cose importanti."
+            sign_payload["horoscope"] = text
+
+        return used_model
 
     @staticmethod
     def _looks_non_italian_or_mixed(text: str) -> bool:
