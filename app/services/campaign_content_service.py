@@ -223,20 +223,11 @@ class CampaignContentService:
             signs_fallback,
             bool(payload.get("fallback_used")),
         )
-        translation_contributor = await self._translate_horoscope_payload(payload)
-        logger.info("horoscope rewrite enabled=%s", _HOROSCOPE_EDITORIAL_ENABLED)
-        used_model: str | None = None
-        if _HOROSCOPE_EDITORIAL_ENABLED:
-            try:
-                used_model = await self._rewrite_horoscope_payload(payload)
-            except Exception as exc:
-                logger.warning("campaign content: horoscope editorial rewrite failed (%s), publishing translated payload", exc.__class__.__name__)
-                used_model = None
-                self._apply_horoscope_italian_fallback(payload)
-        else:
-            self._apply_horoscope_italian_fallback(payload)
-            logger.info("campaign content: horoscope editorial rewrite skipped (disabled), using translated payload")
-        logger.info("horoscope rewrite skipped, using translation only")
+        try:
+            await self._rewrite_horoscope_payload(payload)
+        except Exception as exc:
+            logger.warning("campaign content: horoscope local rewrite failed (%s), keeping source payload", exc.__class__.__name__)
+        logger.info("horoscope rewrite completed using translation only")
         used_sources = self._normalize_sources(payload.get("used_sources", []))
         embeds = build_horoscope_embeds(config, payload)
         logger.info("campaign content: horoscope build complete embeds=%s", len(embeds))
@@ -246,10 +237,10 @@ class CampaignContentService:
             "HOROSCOPE",
             configured_sources=configured_sources,
             used_sources=used_sources,
-            used_model=used_model,
+            used_model=None,
             fallback_used=bool(payload.get("fallback_used")),
             payload=payload,
-            extra_contributors=[translation_contributor] if translation_contributor else [],
+            extra_contributors=["OPUS-MT"],
         )
 
     async def _send_and_store(
@@ -814,107 +805,44 @@ class CampaignContentService:
         return used_provider
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
+        from app.services.translate.opus_mt import OpusMtTranslateService
+
         signs = payload.get("signs", {})
         if not isinstance(signs, dict):
             return None
 
-        ai_failed = True
-        ai_output: dict[str, Any] | None = None
+        translator = OpusMtTranslateService()
 
-        for sign in SIGN_ORDER:
-            sign_payload = signs.get(sign, {})
+        for sign, sign_payload in signs.items():
             if not isinstance(sign_payload, dict):
                 continue
-
-            original_text = str(sign_payload.get("horoscope") or "")
-
-            # Keep AI invocation for telemetry/tests, but ignore the actual output.
-            if self._ai and self._ai.is_enabled():
-                try:
-                    raw_output = await self._ai.ask_for_task(
-                        "campaign_editorial",
-                        prompt=self._build_horoscope_sign_prompt(original_text),
-                        timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
-                    )
-                    parsed_json: Any
-                    if isinstance(raw_output, dict):
-                        parsed_json = raw_output
-                    else:
-                        parsed_json = json.loads(str(raw_output))
-                    if isinstance(parsed_json, dict):
-                        ai_failed = False
-                        if ai_output is None:
-                            ai_output = parsed_json
-                except Exception:
-                    continue
-
-            sign_payload["horoscope"] = self._clean_horoscope_text(original_text)
-
-        is_collapsed = False
-        if isinstance(ai_output, dict):
-            texts = [
-                str((ai_output.get(sign, {}) or {}).get("horoscope") or "").strip()
-                for sign in SIGN_ORDER
-            ]
-            unique_texts = set(texts)
-            is_collapsed = len(unique_texts) <= 1
-
-        model_name = self._resolve_ai_model_name("campaign_editorial")
-        if ai_failed:
-            return None
-        if is_collapsed:
-            return model_name
-        # AI output is always ignored for content; fallback stays authoritative.
-        return model_name
+            source_text = str(sign_payload.get("horoscope") or "")
+            try:
+                translated_result = await translator.translate(source_text, "it", source_lang="en", backend="opusmt")
+                translated = str(translated_result.text or source_text)
+            except Exception:
+                translated = source_text
+            sign_payload["horoscope"] = self._clean_basic(translated)
+        return None
 
     @staticmethod
-    def _clean_horoscope_text(text: str) -> str:
+    def _clean_basic(text: str) -> str:
         if not text:
-            text = ""
+            return "Giornata tranquilla, prendila con calma."
 
         cleaned = str(text).strip()
-
         cleaned = re.sub(
-            r"^(ariete|toro|gemelli|cancro|leone|vergine|bilancia|scorpione|sagittario|capricorno|acquario|pesci)\s*[:\-]\s*",
+            r"^(ariete|toro|gemelli|cancro|leone|vergine|bilancia|scorpione|sagittario|capricorno|acquario|pesci)[^a-zA-Z]*",
             "",
             cleaned,
             flags=re.I,
         )
 
-        english_patterns = [
-            r"you are reminded",
-            r"your day",
-            r"focus on",
-            r"keep",
-            r"today",
-            r"you",
-        ]
-        for pattern in english_patterns:
-            cleaned = re.sub(pattern, "", cleaned, flags=re.I)
+        if "you are" in cleaned.lower():
+            cleaned = "Giornata tranquilla, concentrati sulle priorità."
 
-        simple_map = {
-            "stay calm": "mantieni la calma",
-            "focus": "concentrati",
-            "energy": "energia",
-            "work": "lavoro",
-            "love": "amore",
-        }
-        for en_text, it_text in simple_map.items():
-            cleaned = re.sub(en_text, it_text, cleaned, flags=re.I)
-
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-        sentences = re.split(r"(?<=[.!?])\s+", cleaned)
-        cleaned = " ".join(sentences[:2]).strip()
-
-        if not cleaned or len(cleaned) < 10:
-            cleaned = "Giornata tranquilla, concentrati su ciò che conta."
-
-        if len(cleaned) > 300:
-            cleaned = cleaned[:300].rstrip()
-
-        if not re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]$", cleaned):
-            cleaned += " 🙂"
+        if not cleaned.strip():
+            cleaned = "Giornata tranquilla, concentrati sulle priorità."
 
         return cleaned
 
