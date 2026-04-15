@@ -157,120 +157,70 @@ def test_execute_horoscope_service_uses_async_fetch_path() -> None:
     asyncio.run(_run())
 
 
-def test_horoscope_rewrite_uses_valid_translation_and_cleans_sign_prefix() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-    payload = {"signs": {"Ariete": {"horoscope": "Today focus on one task."}}}
-
-    async def _run() -> None:
-        with patch(
-            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(return_value=SimpleNamespace(text="Aries: Oggi concentrati su un solo compito e chiudilo bene.")),
-        ):
-            await service._rewrite_horoscope_payload(payload)
-        final_text = payload["signs"]["Ariete"]["horoscope"]
-        assert final_text == "Oggi concentrati su un solo compito e chiudilo bene."
-        assert "aries:" not in final_text.lower()
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_sets_unavailable_when_translation_stays_english() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-    payload = {"signs": {"Toro": {"horoscope": "Today with Venus and Jupiter you are lucky."}}}
-
-    async def _run() -> None:
-        with patch(
-            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(return_value=SimpleNamespace(text="Today with Venus and Jupiter you are lucky.")),
-        ):
-            await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Toro"]["horoscope"] == "Dati non disponibili per questo segno al momento."
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_sets_unavailable_when_input_is_empty() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-    payload = {"signs": {"Gemelli": {"horoscope": ""}}}
-
-    async def _run() -> None:
-        await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Gemelli"]["horoscope"] == "Dati non disponibili per questo segno al momento."
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_keeps_full_translated_content_without_aggressive_truncation() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-    source = (
-        "Today you can close one pending issue before lunch and then recover focus. "
-        "A direct message helps reduce tension in the team."
+def test_horoscope_rewrite_passes_raw_text_to_translator_and_assigns_output() -> None:
+    translator = SimpleNamespace(
+        translate=AsyncMock(return_value=SimpleNamespace(text="Traduzione completa in italiano."))
     )
-    translated = (
-        "Ariete: Oggi puoi chiudere una questione rimasta aperta prima di pranzo e poi recuperare concentrazione. "
-        "Un messaggio diretto aiuta a ridurre la tensione nel team."
+    service = CampaignContentService(
+        database=SimpleNamespace(),
+        bot=SimpleNamespace(),
+        ai_service=None,
+        translate_service=translator,
     )
-    payload = {"signs": {"Ariete": {"horoscope": source}}}
+    payload = {"signs": {"Ariete": {"horoscope": "Full english horoscope text."}}}
 
     async def _run() -> None:
-        with patch(
-            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(return_value=SimpleNamespace(text=translated)),
-        ):
-            await service._rewrite_horoscope_payload(payload)
-        final_text = payload["signs"]["Ariete"]["horoscope"]
-        assert final_text.startswith("Oggi puoi chiudere una questione rimasta aperta")
-        assert "Un messaggio diretto aiuta a ridurre la tensione" in final_text
-        assert "Ariete:" not in final_text
-        assert len(final_text.split()) > 18
+        used_model = await service._rewrite_horoscope_payload(payload)
+        assert used_model is None
+        translator.translate.assert_awaited_once_with(
+            "Full english horoscope text.",
+            "it",
+            source_lang="en",
+            backend="opusmt",
+        )
+        assert payload["signs"]["Ariete"]["horoscope"] == "Traduzione completa in italiano."
 
     asyncio.run(_run())
 
 
-def test_horoscope_rewrite_uses_unavailable_text_when_translation_fails() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-    payload = {
-        "signs": {
-            "Ariete": {"horoscope": "Today you feel lucky with new opportunities around you."},
-            "Toro": {"horoscope": "Today your focus improves if you slow down and prioritize."},
-        }
-    }
+def test_horoscope_rewrite_keeps_original_text_when_translation_fails() -> None:
+    translator = SimpleNamespace(
+        translate=AsyncMock(side_effect=RuntimeError("translator down"))
+    )
+    service = CampaignContentService(
+        database=SimpleNamespace(),
+        bot=SimpleNamespace(),
+        ai_service=None,
+        translate_service=translator,
+    )
+    original = "Today with Venus and Jupiter you are lucky."
+    payload = {"signs": {"Toro": {"horoscope": original}}}
 
     async def _run() -> None:
-        with patch(
-            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(side_effect=RuntimeError("opus unavailable")),
-        ):
-            await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Ariete"]["horoscope"] == "Dati non disponibili per questo segno al momento."
-        assert payload["signs"]["Toro"]["horoscope"] == "Dati non disponibili per questo segno al momento."
+        used_model = await service._rewrite_horoscope_payload(payload)
+        assert used_model is None
+        translator.translate.assert_awaited_once()
+        assert payload["signs"]["Toro"]["horoscope"] == original
 
     asyncio.run(_run())
 
 
-def test_horoscope_rewrite_preserves_sign_differences_when_translations_are_different() -> None:
-    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-    payload = {
-        "signs": {
-            "Ariete": {"horoscope": "Aries: Today you close a bug quickly and move on."},
-            "Toro": {"horoscope": "Taurus: Today you renegotiate one monthly subscription."},
-        }
-    }
-
-    async def _translate_side_effect(text: str, *_args, **_kwargs):
-        if "bug" in text.lower():
-            return SimpleNamespace(text="Aries: Oggi chiudi un bug rapidamente e passi oltre.")
-        return SimpleNamespace(text="Taurus: Oggi rinegozi un abbonamento mensile con calma.")
+def test_horoscope_rewrite_does_not_use_ai_service() -> None:
+    ai = SimpleNamespace(ask_for_task=AsyncMock())
+    translator = SimpleNamespace(
+        translate=AsyncMock(return_value=SimpleNamespace(text="Tradotto"))
+    )
+    service = CampaignContentService(
+        database=SimpleNamespace(),
+        bot=SimpleNamespace(),
+        ai_service=ai,
+        translate_service=translator,
+    )
+    payload = {"signs": {"Gemelli": {"horoscope": "Original text"}}}
 
     async def _run() -> None:
-        with patch(
-            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(side_effect=_translate_side_effect),
-        ):
-            await service._rewrite_horoscope_payload(payload)
-
-        assert payload["signs"]["Ariete"]["horoscope"] != payload["signs"]["Toro"]["horoscope"]
-        assert payload["signs"]["Ariete"]["horoscope"].startswith("Oggi chiudi")
-        assert payload["signs"]["Toro"]["horoscope"].startswith("Oggi rinegozi")
+        used_model = await service._rewrite_horoscope_payload(payload)
+        assert used_model is None
+        assert ai.ask_for_task.await_count == 0
 
     asyncio.run(_run())

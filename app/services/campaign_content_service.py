@@ -877,25 +877,17 @@ class CampaignContentService:
         for sign, sign_payload in signs.items():
             if not isinstance(sign_payload, dict):
                 continue
-            source_text = str(sign_payload.get("horoscope") or "").strip()
-            if not source_text:
-                sign_payload["horoscope"] = _HOROSCOPE_UNAVAILABLE_TEXT
-                continue
-            translated = ""
+            raw_text = str(sign_payload.get("horoscope") or "")
             try:
                 if self._translate is not None:
-                    translated_result = await self._translate.translate(source_text, "it", source_lang="en", backend="opusmt")
-                    translated = str(translated_result.text or "").strip()
+                    translated = await self._translate.translate(raw_text, "it", source_lang="en", backend="opusmt")
                 else:
                     from app.services.translate.opus_mt import OpusMtTranslateService
 
-                    translator = OpusMtTranslateService()
-                    translated_result = await translator.translate(source_text, "it", source_lang="en", backend="opusmt")
-                    translated = str(translated_result.text or "").strip()
+                    translated = await OpusMtTranslateService().translate(raw_text, "it", source_lang="en", backend="opusmt")
+                sign_payload["horoscope"] = translated.text if hasattr(translated, "text") else str(translated)
             except Exception as exc:
                 logger.warning("horoscope translation failed sign=%s backend=opusmt error=%s", sign, exc.__class__.__name__)
-
-            sign_payload["horoscope"] = self._finalize_horoscope_translation(sign, source_text, translated)
         return None
 
     def _finalize_horoscope_translation(self, sign: str, source_text: str, translated_text: str) -> str:
