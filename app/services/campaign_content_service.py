@@ -818,6 +818,9 @@ class CampaignContentService:
         if not isinstance(signs, dict):
             return None
 
+        ai_failed = True
+        ai_output: dict[str, Any] | None = None
+
         for sign in SIGN_ORDER:
             sign_payload = signs.get(sign, {})
             if not isinstance(sign_payload, dict):
@@ -828,18 +831,41 @@ class CampaignContentService:
             # Keep AI invocation for telemetry/tests, but ignore the actual output.
             if self._ai and self._ai.is_enabled():
                 try:
-                    await self._ai.ask_for_task(
+                    raw_output = await self._ai.ask_for_task(
                         "campaign_editorial",
                         prompt=self._build_horoscope_sign_prompt(original_text),
                         timeout_seconds=_HOROSCOPE_EDITORIAL_TIMEOUT_SECONDS,
                     )
+                    parsed_json: Any
+                    if isinstance(raw_output, dict):
+                        parsed_json = raw_output
+                    else:
+                        parsed_json = json.loads(str(raw_output))
+                    if isinstance(parsed_json, dict):
+                        ai_failed = False
+                        if ai_output is None:
+                            ai_output = parsed_json
                 except Exception:
-                    pass
+                    continue
 
             sign_payload["horoscope"] = self._clean_horoscope_text(original_text)
 
-        # AI is called for telemetry/tests, but output is always ignored.
-        return None
+        is_collapsed = False
+        if isinstance(ai_output, dict):
+            texts = [
+                str((ai_output.get(sign, {}) or {}).get("horoscope") or "").strip()
+                for sign in SIGN_ORDER
+            ]
+            unique_texts = set(texts)
+            is_collapsed = len(unique_texts) <= 1
+
+        model_name = self._resolve_ai_model_name("campaign_editorial")
+        if ai_failed:
+            return None
+        if is_collapsed:
+            return model_name
+        # AI output is always ignored for content; fallback stays authoritative.
+        return model_name
 
     @staticmethod
     def _clean_horoscope_text(text: str) -> str:
