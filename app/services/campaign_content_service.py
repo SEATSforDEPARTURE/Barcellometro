@@ -158,6 +158,15 @@ _HOROSCOPE_ENGLISH_ALIASES = {
     "Acquario": "Aquarius",
     "Pesci": "Pisces",
 }
+_HOROSCOPE_SECTION_LABELS = {
+    "love", "work", "money", "energy", "advice", "friction",
+    "amore", "lavoro", "soldi", "energia", "consiglio", "oroscopo", "horoscope",
+}
+_HOROSCOPE_ALL_SIGN_PREFIXES = tuple(
+    dict.fromkeys(
+        [*SIGN_ORDER, *[alias for alias in _HOROSCOPE_ENGLISH_ALIASES.values() if alias]]
+    )
+)
 
 
 class CampaignContentService:
@@ -891,15 +900,18 @@ class CampaignContentService:
 
     def _finalize_horoscope_translation(self, sign: str, source_text: str, translated_text: str) -> str:
         cleaned = self._strip_horoscope_sign_prefixes(sign, translated_text)
-        if self._is_translation_usable(source_text, cleaned):
+        if self._is_translation_usable(source_text, cleaned) and self._is_horoscope_content_usable(cleaned, sign=sign):
             return cleaned
+        fallback = self._build_horoscope_content_preserving_fallback(source_text)
+        if self._is_horoscope_content_usable(fallback, sign=sign):
+            return fallback
         return _HOROSCOPE_UNAVAILABLE_TEXT
 
     def _strip_horoscope_sign_prefixes(self, sign: str, text: str) -> str:
         cleaned = str(text or "").strip()
         if not cleaned:
             return ""
-        prefixes = [sign, _HOROSCOPE_ENGLISH_ALIASES.get(sign, "")]
+        prefixes = [sign, _HOROSCOPE_ENGLISH_ALIASES.get(sign, ""), *_HOROSCOPE_ALL_SIGN_PREFIXES]
         for prefix in prefixes:
             if not prefix:
                 continue
@@ -911,6 +923,41 @@ class CampaignContentService:
             cleaned,
         )
         return re.sub(r"\s+", " ", cleaned).strip(" \t\r\n-•")
+
+    def _build_horoscope_content_preserving_fallback(self, raw_text: str) -> str:
+        cleaned = str(raw_text or "").strip()
+        if not cleaned:
+            return ""
+        cleaned = self._strip_horoscope_sign_prefixes("", cleaned)
+        # Keep only readable semantic content; do not invent new text.
+        cleaned = re.sub(r"^[\s\-–|:;,.]+", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n-•")
+        if not cleaned:
+            return ""
+        if cleaned and cleaned[-1].isalnum():
+            cleaned = f"{cleaned}."
+        if cleaned:
+            cleaned = cleaned[0].upper() + cleaned[1:]
+        return cleaned
+
+    def _is_horoscope_content_usable(self, text: str, *, sign: str | None = None) -> bool:
+        normalized = str(text or "").strip()
+        if not normalized:
+            return False
+        stripped = self._strip_horoscope_sign_prefixes(sign or "", normalized).strip()
+        if not stripped:
+            return False
+        tokenized = re.findall(r"[A-Za-zÀ-ÿ0-9']+", stripped.lower())
+        if not tokenized:
+            return False
+        if all(token in _HOROSCOPE_SECTION_LABELS for token in tokenized):
+            return False
+        if len(tokenized) == 1 and tokenized[0] in {item.lower() for item in _HOROSCOPE_ALL_SIGN_PREFIXES}:
+            return False
+        useful_chars = re.sub(r"[^A-Za-zÀ-ÿ0-9]+", "", stripped)
+        if len(useful_chars) < 8:
+            return False
+        return True
 
     def _is_translation_usable(self, source_text: str, translated_text: str) -> bool:
         normalized = str(translated_text or "").strip()
