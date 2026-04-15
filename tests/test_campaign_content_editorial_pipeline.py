@@ -399,29 +399,23 @@ def test_news_rewrite_falls_back_when_ai_fails() -> None:
     asyncio.run(_run())
 
 
-def test_build_horoscope_embeds_strip_inner_headings() -> None:
+def test_build_horoscope_embeds_keeps_full_sign_text_unchanged() -> None:
     payload = {
         "signs": {
             "Acquario": {
-                "love": "Acquario Love Alert: giornata positiva in amore.",
-                "work": "Acquario: lavoro in recupero.",
-                "money": "Money Vibes: prudenza.",
-                "energy": "Energia del genio: alta.",
-                "friction": "Con chi ti stressa.",
-                "advice": "Respira.",
+                "horoscope": "Acquario Love Alert: giornata positiva in amore. Energia del genio: alta. 😎",
                 "confidence": 1,
             }
         }
     }
     # fill required signs quickly
     for s in ["Ariete","Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Pesci"]:
-        payload["signs"][s] = {"love":"ok","work":"ok","money":"ok","energy":"ok","friction":"ok","advice":"ok","confidence":1}
+        payload["signs"][s] = {"horoscope": "ok", "confidence": 1}
     embeds = build_horoscope_embeds({"embed_title": "🔮 OROSCOPO CRICETOSO"}, payload)
     assert len(embeds) >= 2
     acquario_field = next(field for embed in embeds[1:] for field in embed.fields if "ACQUARIO" in field.name)
     values = acquario_field.value or ""
-    assert "Love Alert" not in values
-    assert "Energia del genio" not in values
+    assert values == "- Acquario Love Alert: giornata positiva in amore. Energia del genio: alta. 😎"
 
 
 def test_build_horoscope_embeds_paginate_signs_and_respect_embed_limits() -> None:
@@ -432,7 +426,7 @@ def test_build_horoscope_embeds_paginate_signs_and_respect_embed_limits() -> Non
     payload = {
         "generated_at": "2026-04-09T14:30:00+00:00",
         "signs": {
-            sign: {"love": verbose, "work": verbose, "money": verbose, "energy": verbose, "friction": "ok", "advice": "ok", "confidence": 1.0}
+            sign: {"horoscope": verbose, "confidence": 1.0}
             for sign in SIGN_ORDER
         },
     }

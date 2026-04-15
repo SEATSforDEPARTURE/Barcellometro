@@ -183,6 +183,26 @@ def test_horoscope_rewrite_passes_raw_text_to_translator_and_assigns_output() ->
     asyncio.run(_run())
 
 
+def test_horoscope_rewrite_accepts_string_translation_result() -> None:
+    translator = SimpleNamespace(
+        translate=AsyncMock(return_value="Traduzione come stringa completa.")
+    )
+    service = CampaignContentService(
+        database=SimpleNamespace(),
+        bot=SimpleNamespace(),
+        ai_service=None,
+        translate_service=translator,
+    )
+    payload = {"signs": {"Ariete": {"horoscope": "Full english horoscope text."}}}
+
+    async def _run() -> None:
+        used_model = await service._rewrite_horoscope_payload(payload)
+        assert used_model is None
+        assert payload["signs"]["Ariete"]["horoscope"] == "Traduzione come stringa completa."
+
+    asyncio.run(_run())
+
+
 def test_horoscope_rewrite_keeps_original_text_when_translation_fails() -> None:
     translator = SimpleNamespace(
         translate=AsyncMock(side_effect=RuntimeError("translator down"))

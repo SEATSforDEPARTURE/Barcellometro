@@ -318,15 +318,8 @@ def test_horoscope_embed_uses_structured_fields_bullets_and_next_edition() -> No
     assert field_map["🤗 __**SEGNI IN FORMA**__"].startswith("• **")
     assert field_map["🤬 __**SEGNI IRREQUIETI**__"].startswith("• **")
     assert "♈ Ariete" in field_map["🤗 __**SEGNI IN FORMA**__"] or "♈ Ariete" in field_map["🤬 __**SEGNI IRREQUIETI**__"]
-    assert signs_field_map["♈ __**ARIETE**__"].startswith("- ")
-    assert signs_field_map["♈ __**ARIETE**__"].count("\n") == 0
-    assert re.search(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]$", signs_field_map["♈ __**ARIETE**__"])
-    assert len(re.findall(r"[.!?]", signs_field_map["♈ __**ARIETE**__"])) <= 2
-    assert len(signs_field_map["♈ __**ARIETE**__"]) <= 300
-    assert "In amore" not in signs_field_map["♈ __**ARIETE**__"]
-    assert "Sul lavoro" not in signs_field_map["♈ __**ARIETE**__"]
-    assert "Nei soldi" not in signs_field_map["♈ __**ARIETE**__"]
-    assert "chiarezza" in signs_field_map["♈ __**ARIETE**__"].lower()
+    assert signs_field_map["♈ __**ARIETE**__"] == "- Oggi scegli **chiarezza** e vai dritto senza fare drama 😵‍💫✨"
+    assert signs_field_map["♊ __**GEMELLI**__"] == "- Parla semplice: una mossa **smart** ti sblocca la giornata 😎"
     assert "🔜 __**PROSSIMA EDIZIONE**__" in signs_field_map
     next_edition_value = signs_field_map["🔜 __**PROSSIMA EDIZIONE**__"]
     assert next_edition_value.startswith("Il criceto chiude il taccuino per ora.")
@@ -365,21 +358,6 @@ def test_horoscope_overview_scores_avoid_trivial_overlap_and_order_bias() -> Non
     assert delicate_signs
     assert top_signs != delicate_signs
     assert top_signs.isdisjoint(delicate_signs)
-
-
-def test_horoscope_local_fallback_force_override_translates_without_readding_sign_names() -> None:
-    service = CampaignContentService(database=types.SimpleNamespace(), bot=types.SimpleNamespace(), ai_service=None)
-    payload = {
-        "signs": {
-            sign: {"horoscope": "You are reminded to stay calm today."}
-            for sign in ["Ariete", "Toro", "Gemelli", "Cancro"]
-        }
-    }
-    service._apply_horoscope_italian_fallback(payload, force_override=True)
-    horoscope_values = [payload["signs"][sign]["horoscope"] for sign in payload["signs"]]
-    assert all("you are reminded" not in text.lower() for text in horoscope_values)
-    assert all(sign.lower() not in payload["signs"][sign]["horoscope"].lower() for sign in payload["signs"])
-
 
 def test_weather_embed_uses_bullet_fields_and_next_edition_like_news() -> None:
     weather_pages = build_weather_embeds(

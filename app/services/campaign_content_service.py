@@ -878,6 +878,8 @@ class CampaignContentService:
             if not isinstance(sign_payload, dict):
                 continue
             raw_text = str(sign_payload.get("horoscope") or "")
+            if not raw_text:
+                continue
             try:
                 if self._translate is not None:
                     translated = await self._translate.translate(raw_text, "it", source_lang="en", backend="opusmt")
@@ -885,7 +887,8 @@ class CampaignContentService:
                     from app.services.translate.opus_mt import OpusMtTranslateService
 
                     translated = await OpusMtTranslateService().translate(raw_text, "it", source_lang="en", backend="opusmt")
-                sign_payload["horoscope"] = translated.text if hasattr(translated, "text") else str(translated)
+                translated_text = translated.text if hasattr(translated, "text") else str(translated)
+                sign_payload["horoscope"] = str(translated_text)
             except Exception as exc:
                 logger.warning("horoscope translation failed sign=%s backend=opusmt error=%s", sign, exc.__class__.__name__)
         return None
