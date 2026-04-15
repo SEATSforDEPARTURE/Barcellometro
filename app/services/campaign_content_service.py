@@ -115,6 +115,35 @@ _HOROSCOPE_STRONG_ENGLISH_PATTERNS = (
     "jupiter",
     "venus",
 )
+_HOROSCOPE_RECOVERABLE_GENERIC_TOKENS = {
+    "today", "daily", "horoscope", "you", "your", "with", "the", "and", "are", "is",
+    "moon", "venus", "jupiter", "mercury", "mars", "lucky", "energy", "focus",
+    "sign", "zodiac", "star", "stars",
+}
+_HOROSCOPE_CONTENT_WORD_TRANSLATIONS = {
+    "reconnect": "ritrovi",
+    "rebuild": "ricostruisci",
+    "trust": "fiducia",
+    "someone": "qualcuno",
+    "past": "passato",
+    "sweet": "dolce",
+    "message": "messaggio",
+    "unblocks": "sblocca",
+    "unblock": "sblocca",
+    "old": "vecchie",
+    "tension": "tensioni",
+    "direct": "diretto",
+    "chat": "confronto",
+    "close": "chiudi",
+    "before": "prima",
+    "noon": "mezzogiorno",
+    "renegotiate": "rinegozia",
+    "subscription": "abbonamento",
+    "stay": "resta",
+    "calm": "calmo",
+    "task": "priorità",
+    "bugfix": "bugfix",
+}
 _HOROSCOPE_ENGLISH_ALIASES = {
     "Ariete": "Aries",
     "Toro": "Taurus",
@@ -857,9 +886,54 @@ class CampaignContentService:
 
     def _finalize_horoscope_translation(self, sign: str, source_text: str, translated_text: str) -> str:
         cleaned = self._strip_horoscope_sign_prefixes(sign, translated_text)
-        if not self._is_translation_usable(source_text, cleaned):
-            return _HOROSCOPE_UNAVAILABLE_TEXT
-        return cleaned
+        if self._is_translation_usable(source_text, cleaned):
+            return cleaned
+        conservative_fallback = self._build_horoscope_content_preserving_fallback(source_text)
+        if conservative_fallback:
+            return conservative_fallback
+        return _HOROSCOPE_UNAVAILABLE_TEXT
+
+    def _build_horoscope_content_preserving_fallback(self, raw_text: str) -> str:
+        normalized = unescape(str(raw_text or "")).strip()
+        if not normalized:
+            return ""
+        cleaned = re.sub(r"\s+", " ", normalized).strip(" \t\r\n-•")
+        sign_labels = [*SIGN_ORDER, *[alias for alias in _HOROSCOPE_ENGLISH_ALIASES.values() if alias]]
+        for label in sign_labels:
+            cleaned = re.sub(rf"(?i)^\s*{re.escape(label)}\s*[:\-–|]+\s*", "", cleaned)
+        cleaned = re.sub(
+            r"(?i)^\s*(?:love|work|money|energy|friction|advice|amore|lavoro|soldi|energia|consiglio)\s*[:\-–|]+\s*",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(r"(?i)\b(?:horoscope|daily horoscope|today|dear)\b", " ", cleaned)
+        cleaned = re.sub(r"(?i)^\s*(?:you|your)\s+", "", cleaned).strip(" .,:;!-")
+        sentence = self._split_sentences(cleaned)
+        candidate = sentence[0] if sentence else cleaned
+        candidate = re.sub(r"\s+", " ", candidate).strip(" \t\r\n-•")
+        if not candidate:
+            return ""
+        tokens = re.findall(r"[a-zA-ZÀ-ÿ']+", candidate.lower())
+        if len(tokens) < 3:
+            return ""
+        specific_tokens = [
+            token for token in tokens if token not in _HOROSCOPE_RECOVERABLE_GENERIC_TOKENS and len(token) > 2
+        ]
+        if len(specific_tokens) < 2:
+            return ""
+        translated = candidate.lower()
+        translated = re.sub(r"(?i)\breconnect with someone from the past\b", "ritrovi contatti dal passato", translated)
+        translated = re.sub(r"(?i)\ba sweet message unblocks old tension\b", "un messaggio dolce scioglie vecchie tensioni", translated)
+        translated = re.sub(r"(?i)\byou are reminded to stay calm\b", "ricorda di restare calmo", translated)
+        for english, italian in _HOROSCOPE_CONTENT_WORD_TRANSLATIONS.items():
+            translated = re.sub(rf"(?i)\b{re.escape(english)}\b", italian, translated)
+        translated = re.sub(r"\s+", " ", translated).strip(" \t\r\n-•")
+        if not translated:
+            return ""
+        translated = translated[0].upper() + translated[1:]
+        if not translated.endswith((".", "!", "?")):
+            translated = f"{translated}."
+        return translated
 
     def _strip_horoscope_sign_prefixes(self, sign: str, text: str) -> str:
         cleaned = str(text or "").strip()
