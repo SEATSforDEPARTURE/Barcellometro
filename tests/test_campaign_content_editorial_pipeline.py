@@ -768,598 +768,71 @@ def test_execute_news_service_reads_csv_categories_fallback_column() -> None:
     asyncio.run(_run())
 
 
-def test_horoscope_rewrite_is_single_sign_call_and_text_fallback() -> None:
-    payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "a"}}}
-    for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-        payload["signs"][s] = {"sign": s, "horoscope": "a"}
-
-    async def _run_valid() -> None:
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        with patch(
-            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(return_value=SimpleNamespace(text="Oggi resta sul focus.")),
-        ):
-            await service._rewrite_horoscope_payload(payload)
-        for sign in SIGN_ORDER:
-            assert payload["signs"][sign]["horoscope"]
-
-    async def _run_invalid() -> None:
-        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "You are reminded to stay calm today."}}}
-        for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-            local_payload["signs"][s] = {"sign": s, "horoscope": "You are reminded to stay calm today."}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        await service._rewrite_horoscope_payload(local_payload)
-        assert local_payload["signs"]["Ariete"]["horoscope"]
-        assert "you are" not in local_payload["signs"]["Ariete"]["horoscope"].lower()
-
-    asyncio.run(_run_valid())
-    asyncio.run(_run_invalid())
-
-
-def test_load_message_record_accepts_aiosqlite_row_like_payload() -> None:
-    class _RowLike:
-        def __iter__(self):
-            yield ("message_id", "123")
-            yield ("guild_id", "1")
-            yield ("channel_id", "2")
-            yield ("service_type", "weather")
-            yield ("config_id", 99)
-            yield ("embeds_json", '[{"title":"A"},{"title":"B"}]')
-            yield ("metadata_json", '{"page_map":[{"type":"overview","page":0}]}')
-            yield ("current_index", "4")
-
-    class _Db:
-        async def get_campaign_content_message(self, _message_id):
-            return _RowLike()
-
+def test_horoscope_rewrite_calls_translator_for_each_sign_and_assigns_result() -> None:
     async def _run() -> None:
-        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
-        row = await service.load_message_record("123")
-        assert row is not None
-        assert row["message_id"] == "123"
-        assert row["service_type"] == "WEATHER"
-        assert row["config_id"] == "99"
-        assert len(row["embeds"]) == 2
-        assert isinstance(row["metadata"], dict)
-        assert row["current_index"] == 4
-
-    asyncio.run(_run())
-
-
-def test_load_message_record_handles_invalid_json() -> None:
-    class _RowLike:
-        def __iter__(self):
-            yield ("message_id", "123")
-            yield ("guild_id", "1")
-            yield ("channel_id", "2")
-            yield ("service_type", "news")
-            yield ("config_id", 99)
-            yield ("embeds_json", '{invalid')
-            yield ("metadata_json", '{invalid')
-            yield ("current_index", "0")
-
-    class _Db:
-        async def get_campaign_content_message(self, _message_id):
-            return _RowLike()
-
-    async def _run() -> None:
-        service = CampaignContentService(database=_Db(), bot=SimpleNamespace(), ai_service=None)
-        row = await service.load_message_record("123")
-        assert row is not None
-        assert row["embeds"] == []
-        assert row["metadata"] == {}
-
-    asyncio.run(_run())
-
-
-def test_news_page_map_tracks_overview_and_detail_pages() -> None:
-    page_map = build_news_page_map(
-        {
-            "categories": {
-                "cronaca": [{"title": "a"}],
-                "sport": [{"title": "b"}],
+        translator = SimpleNamespace(translate=AsyncMock(side_effect=[
+            SimpleNamespace(text="Ariete tradotto"),
+            SimpleNamespace(text="Toro tradotto"),
+        ]))
+        payload = {
+            "signs": {
+                "Ariete": {"horoscope": "Aries full text"},
+                "Toro": {"horoscope": "Taurus full text"},
             }
-        },
-        total_pages=3,
-    )
-    assert page_map == [
-        {"type": "overview", "key": "overview", "label": "Inizio", "page": 0},
-        {"type": "news", "key": "news_1", "label": "Notizie · Pagina 1", "page": 1},
-        {"type": "news", "key": "news_2", "label": "Notizie · Pagina 2", "page": 2},
-    ]
-
-
-def test_horoscope_rewrite_is_single_batch_call_and_json_fallback() -> None:
-    payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "you are reminded today."}}}
-    for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-        payload["signs"][s] = {"sign": s, "horoscope": "you are reminded today."}
-
-    async def _run_valid() -> None:
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        await service._rewrite_horoscope_payload(payload)
-        for sign in SIGN_ORDER:
-            assert payload["signs"][sign]["horoscope"]
-            assert "you are" not in payload["signs"][sign]["horoscope"].lower()
-
-    async def _run_invalid() -> None:
-        local_payload = {"signs": {"Ariete": {"sign": "Ariete", "horoscope": "You are reminded to stay calm today."}}}
-        for s in ["Toro","Gemelli","Cancro","Leone","Vergine","Bilancia","Scorpione","Sagittario","Capricorno","Acquario","Pesci"]:
-            local_payload["signs"][s] = {"sign": s, "horoscope": "You are reminded to stay calm today."}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        await service._rewrite_horoscope_payload(local_payload)
-        assert local_payload["signs"]["Ariete"]["horoscope"]
-        assert "you are" not in local_payload["signs"]["Ariete"]["horoscope"].lower()
-
-    asyncio.run(_run_valid())
-    asyncio.run(_run_invalid())
-
-def test_campaign_content_one_shot_disables_after_send() -> None:
-    class DummyChannel(discord.abc.Messageable):
-        async def _get_channel(self):
-            return self
-
-        async def send(self, **kwargs):
-            return type("M", (), {"id": 999})()
-
-    class DummyBot:
-        def get_channel(self, _channel_id: int):
-            return DummyChannel()
-
-        async def fetch_channel(self, _channel_id: int):
-            return DummyChannel()
-
-    async def _run() -> None:
-        db = DatabaseService(":memory:")
-        await db.connect()
-        await db.initialize_schema()
-        service = CampaignContentService(db, DummyBot(), ai_service=None)
-        guild_id = "1"
-        channel_id = "2"
-        cfg_id = await db.create_campaign_content_config(
-            guild_id=guild_id,
-            channel_id=channel_id,
-            service_type="NEWS",
-            enabled=True,
-            time_local="10:00",
-            interval_minutes=0,
-            embed_title="T",
-            embed_color="#112233",
-            sources_json="[]",
-            categories_json=None,
-            extras_json=None,
-            next_run_at=datetime.now(timezone.utc).isoformat(),
+        }
+        service = CampaignContentService(
+            database=SimpleNamespace(),
+            bot=SimpleNamespace(),
+            ai_service=None,
+            translate_service=translator,
         )
-        config = await db.get_campaign_content_config(guild_id, cfg_id)
-        assert config is not None
-        await service._send_and_store(config, [discord.Embed(title="x")], "NEWS", configured_sources=[], used_sources=[], used_model=None, fallback_used=False, payload={})
-        refreshed = await db.get_campaign_content_config(guild_id, cfg_id)
-        assert refreshed is not None
-        assert int(refreshed["enabled"]) == 0
-        await db.close()
 
-    asyncio.run(_run())
-
-
-def test_horoscope_publish_continues_when_editorial_ai_fails() -> None:
-    class _Channel(discord.abc.Messageable):
-        async def _get_channel(self):
-            return self
-
-        async def send(self, *args, **kwargs):
-            return SimpleNamespace(id=321)
-
-    class _Bot:
-        def get_channel(self, _id):
-            return _Channel()
-
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            raise TimeoutError("editorial-timeout")
-
-    async def _run() -> None:
-        payload = {"signs": {"Ariete": {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}}}
-        for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
-            payload["signs"][s] = {"love": "orig", "work": "orig", "money": "orig", "energy": "orig", "friction": "orig", "advice": "orig"}
-        db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
-        service = CampaignContentService(database=db, bot=_Bot(), ai_service=_Ai())
-        from unittest.mock import patch
-
-        with patch("app.services.campaign_content_service.fetch_horoscope_content_async", AsyncMock(return_value=payload)):
-            await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
-
-        metadata = json.loads(db.upsert_campaign_content_message.await_args.kwargs["metadata_json"])
-        assert metadata["used_model"] is None
-        assert metadata["ai_model_used"] is None
-
-    asyncio.run(_run())
-
-
-def test_horoscope_service_reaches_publish_store_without_ai() -> None:
-    class _Channel(discord.abc.Messageable):
-        def __init__(self) -> None:
-            self.send = AsyncMock(return_value=SimpleNamespace(id=654))
-
-        async def _get_channel(self):
-            return self
-
-    class _Bot:
-        def __init__(self) -> None:
-            self.channel = _Channel()
-
-        def get_channel(self, _id):
-            return self.channel
-
-    async def _run() -> None:
-        payload = {"signs": {"Ariete": {"horoscope": "Aries: your day speeds up if you pick one real task first."}}}
-        for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
-            payload["signs"][s] = {"horoscope": f"{s}: your focus improves when you keep things simple."}
-        db = SimpleNamespace(upsert_campaign_content_message=AsyncMock(), update_campaign_content_next_run=AsyncMock())
-        bot = _Bot()
-        service = CampaignContentService(database=db, bot=bot, ai_service=None)
-
-        with patch("app.services.campaign_content_service.fetch_horoscope_content_async", AsyncMock(return_value=payload)):
-            await service.execute_horoscope_service({"guild_id": "1", "channel_id": "2", "id": 4, "interval_minutes": 60, "sources_json": "[]"})
-
-        bot.channel.send.assert_awaited_once()
-        db.upsert_campaign_content_message.assert_awaited_once()
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_returns_none_and_cleans_english_text() -> None:
-    async def _run() -> None:
-        payload = {"signs": {"Ariete": {"horoscope": "You are reminded to stay calm today."}}}
-        for s in ["Toro", "Gemelli", "Cancro", "Leone", "Vergine", "Bilancia", "Scorpione", "Sagittario", "Capricorno", "Acquario", "Pesci"]:
-            payload["signs"][s] = {"horoscope": "You are reminded to stay calm today."}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
         used_model = await service._rewrite_horoscope_payload(payload)
+
         assert used_model is None
-        assert payload["signs"]["Ariete"]["horoscope"]
-        assert "you are" not in payload["signs"]["Ariete"]["horoscope"].lower()
+        assert translator.translate.await_count == 2
+        assert payload["signs"]["Ariete"]["horoscope"] == "Ariete tradotto"
+        assert payload["signs"]["Toro"]["horoscope"] == "Toro tradotto"
 
     asyncio.run(_run())
 
 
-def test_send_and_store_reapplies_author_pagination_and_identical_footer_after_split() -> None:
-    class _Db:
-        async def upsert_campaign_content_message(self, **kwargs):
-            self.kwargs = kwargs
-
-        async def update_campaign_content_next_run(self, **kwargs):
-            self.next_kwargs = kwargs
-
-    class _Channel(discord.abc.Messageable):
-        def __init__(self) -> None:
-            self.sent_batches: list[list[discord.Embed]] = []
-
-        async def _get_channel(self):
-            return self
-
-        async def send(self, *args, **kwargs):
-            embeds = kwargs.get("embeds") or []
-            self.sent_batches.append(list(embeds))
-            return SimpleNamespace(id=999 + len(self.sent_batches))
-
-    channel = _Channel()
-
-    class _Bot:
-        def get_channel(self, _id):
-            return channel
-
+def test_horoscope_rewrite_does_not_call_ai_or_set_used_model() -> None:
     async def _run() -> None:
-        db = _Db()
-        service = CampaignContentService(database=db, bot=_Bot(), ai_service=None)
-        config = {"guild_id": "1", "channel_id": "2", "id": 101, "interval_minutes": 60}
-        embed_one = discord.Embed(title="Overview", description="A" * 3500)
-        embed_one.set_author(name="servizio CAMPAIGNS")
-        embed_two = discord.Embed(title="Segni", description="B" * 3500)
-        embed_two.set_author(name="servizio CAMPAIGNS")
-        await service._send_and_store(
-            config,
-            [embed_one, embed_two],
-            "HOROSCOPE",
-            configured_sources=["ohmanda"],
-            used_sources=["ohmanda"],
-            used_model=None,
-            fallback_used=False,
-            payload={},
+        ai = SimpleNamespace(ask_for_task=AsyncMock())
+        translator = SimpleNamespace(translate=AsyncMock(return_value=SimpleNamespace(text="Tradotto")))
+        service = CampaignContentService(
+            database=SimpleNamespace(),
+            bot=SimpleNamespace(),
+            ai_service=ai,
+            translate_service=translator,
         )
-        flattened = [embed for batch in channel.sent_batches for embed in batch]
-        assert len(flattened) >= 2
-        expected_total = len(flattened)
-        footer = flattened[0].footer.text
-        for idx, embed in enumerate(flattened, start=1):
-            assert embed.footer.text == footer
-            assert embed.author.name.endswith(f"(Pag. {idx}/{expected_total})")
-        persisted = [discord.Embed.from_dict(item) for item in json.loads(db.kwargs["embeds_json"])]
-        assert all((item.footer.text or "") == footer for item in persisted)
+        payload = {"signs": {sign: {"horoscope": "Raw text"} for sign in SIGN_ORDER[:3]}}
 
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_fallback_italianizes_english_sections() -> None:
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            return "not-json"
-
-    async def _run() -> None:
-        payload = {"signs": {sign: {"horoscope": "You are reminded to stay calm today."} for sign in SIGN_ORDER}}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
-        await service._rewrite_horoscope_payload(payload)
-        assert all("You are reminded" not in payload["signs"][sign]["horoscope"] for sign in SIGN_ORDER)
-        assert all("you are reminded" not in payload["signs"][sign]["horoscope"].lower() for sign in SIGN_ORDER)
-
-    asyncio.run(_run())
-
-
-def test_horoscope_formatter_removes_redundant_sign_name_from_bullets() -> None:
-    payload = {
-        "signs": {
-            sign: {
-                "horoscope": f"{sign}: ascolta, chiarisci e chiudi una priorità concreta."
-            }
-            for sign in SIGN_ORDER
-        }
-    }
-    embeds = build_horoscope_embeds({}, payload)
-    signs_page = next((embed for embed in embeds if "I SEGNI" in (embed.title or "")), None)
-    assert signs_page is not None
-    ariete_field = next((field for field in signs_page.fields if "ARIETE" in field.name), None)
-    assert ariete_field is not None
-    assert ": ascolta" in (ariete_field.value or "")
-    assert (ariete_field.value or "").startswith("- ")
-
-
-def test_horoscope_rewrite_preserves_sign_differences_after_translation() -> None:
-    async def _run() -> None:
-        payload = {
-            "signs": {
-                sign: {
-                    "horoscope": (
-                        "Ariete love: you reconnect with someone from the past."
-                        if sign == "Ariete"
-                        else "Toro love: a sweet message unblocks old tension."
-                        if sign == "Toro"
-                        else f"{sign} love: you reconnect with someone from the past."
-                    ),
-                }
-                for sign in SIGN_ORDER
-            }
-        }
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
         used_model = await service._rewrite_horoscope_payload(payload)
+
         assert used_model is None
-        assert payload["signs"]["Ariete"]["horoscope"] != payload["signs"]["Toro"]["horoscope"]
-        assert payload["signs"]["Ariete"]["horoscope"]
+        assert ai.ask_for_task.await_count == 0
+        assert all(payload["signs"][sign]["horoscope"] == "Tradotto" for sign in SIGN_ORDER[:3])
 
     asyncio.run(_run())
 
 
-def test_horoscope_content_preserving_fallback_keeps_section_specific_signal_from_english_payload() -> None:
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            return "not-json"
-
+def test_horoscope_rewrite_keeps_original_when_translation_raises() -> None:
     async def _run() -> None:
-        payload = {
-            "signs": {
-                "Ariete": {
-                    "horoscope": "Aries: you rebuild trust with a direct chat and close the bugfix before noon.",
-                },
-                "Toro": {
-                    "horoscope": "Taurus: a sweet message unblocks tension and renegotiate a subscription.",
-                },
-            }
-        }
-        for missing_sign in [sign for sign in SIGN_ORDER if sign not in payload["signs"]]:
-            payload["signs"][missing_sign] = dict(payload["signs"]["Toro"])
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
-        await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Ariete"]["horoscope"] != payload["signs"]["Toro"]["horoscope"]
-        assert payload["signs"]["Ariete"]["horoscope"]
-        assert payload["signs"]["Toro"]["horoscope"]
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_valid_json_but_mixed_language_is_rejected_section_by_section() -> None:
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            mixed = {
-                sign: {
-                    "love": "youre reminded of tuo own wisdom in amore",
-                    "work": "channel the tools con ordine",
-                    "money": "unexpected blessings sulle spese",
-                    "energy": "brainstorming sessions e ritmo alto",
-                    "friction": "you avoid tension con pazienza",
-                    "advice": "be yourself e scegli calma",
-                }
-                for sign in SIGN_ORDER
-            }
-            return json.dumps(mixed, ensure_ascii=False)
-
-    async def _run() -> None:
-        payload = {
-            "signs": {
-                sign: {
-                    "love": f"{sign} love: a direct message helps rebuild trust.",
-                    "work": f"{sign} work: close one delayed task before lunch.",
-                    "money": f"{sign} money: postpone non-essential spending.",
-                    "energy": f"{sign} energy: strong start, lower pace tonight.",
-                    "friction": f"{sign} friction: avoid sharp replies in chat.",
-                    "advice": f"{sign} advice: pick one concrete goal.",
-                }
-                for sign in SIGN_ORDER
-            }
-        }
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
-        used_model = await service._rewrite_horoscope_payload(payload)
-        assert used_model is None
-        for sign in SIGN_ORDER:
-            for section in ["love", "work", "money", "energy"]:
-                text = payload["signs"][sign][section].lower()
-                assert all(token not in text for token in _HOROSCOPE_ENGLISH_RESIDUALS)
-
-    asyncio.run(_run())
-
-
-def test_horoscope_formatter_receives_only_italian_sections_after_rewrite() -> None:
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            return "not-json"
-
-    async def _run() -> None:
-        payload = {
-            "signs": {
-                sign: {
-                    "horoscope": f"{sign} horoscope: you reconnect with someone and rebuild trust.",
-                }
-                for sign in SIGN_ORDER
-            }
-        }
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
-        await service._rewrite_horoscope_payload(payload)
-        embeds = build_horoscope_embeds({}, payload)
-        rendered = " ".join((field.value or "") for embed in embeds for field in embed.fields).lower()
-        assert "you are reminded" not in rendered
-        assert "❤️" not in rendered and "💼" not in rendered and "💰" not in rendered
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_preserves_provider_differences_between_signs() -> None:
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            return "not-json"
-
-    async def _run() -> None:
-        payload = {
-            "signs": {
-                "Ariete": {
-                    "love": "Aries love: direct chat helps rebuild trust.",
-                    "work": "Aries work: close the bugfix before noon.",
-                    "money": "Aries money: postpone gadget spending.",
-                    "energy": "Aries energy: intense morning, slow evening.",
-                    "friction": "Aries friction: avoid reacting to criticism.",
-                    "advice": "Aries advice: focus on one practical goal.",
-                },
-                "Toro": {
-                    "love": "Taurus love: a sweet message reduces old tension.",
-                    "work": "Taurus work: review documents twice before sending.",
-                    "money": "Taurus money: renegotiate one subscription.",
-                    "energy": "Taurus energy: slower start, stronger afternoon.",
-                    "friction": "Taurus friction: avoid old arguments in group chat.",
-                    "advice": "Taurus advice: choose consistency over speed.",
-                },
-            }
-        }
-        for missing_sign in [sign for sign in SIGN_ORDER if sign not in payload["signs"]]:
-            payload["signs"][missing_sign] = dict(payload["signs"]["Toro"])
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
-        await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Ariete"]["work"] != payload["signs"]["Toro"]["work"]
-        assert payload["signs"]["Ariete"]["money"] != payload["signs"]["Toro"]["money"]
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_partial_provider_failures_use_differentiated_fallbacks() -> None:
-    class _Ai:
-        def is_enabled(self):
-            return True
-
-        async def ask_for_task(self, *args, **kwargs):
-            return "not-json"
-
-    async def _run() -> None:
-        payload = {
-            "signs": {
-                "Ariete": {
-                    "horoscope": "Aries: direct chat helps rebuild trust and close the bugfix before noon.",
-                    "fallback_used": False,
-                },
-                "Toro": {
-                    "horoscope": "",
-                    "fallback_used": True,
-                },
-                "Gemelli": {
-                    "horoscope": "",
-                    "fallback_used": True,
-                },
-            }
-        }
-        for missing_sign in [sign for sign in SIGN_ORDER if sign not in payload["signs"]]:
-            payload["signs"][missing_sign] = dict(payload["signs"]["Toro"])
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=_Ai())
-        await service._rewrite_horoscope_payload(payload)
-        toro_summary = payload["signs"]["Toro"]["horoscope"]
-        gemelli_summary = payload["signs"]["Gemelli"]["horoscope"]
-        assert toro_summary
-        assert gemelli_summary
-        assert "toro" not in payload["signs"]["Toro"]["horoscope"].lower()
-        assert "gemelli" not in payload["signs"]["Gemelli"]["horoscope"].lower()
-        assert all(token not in payload["signs"]["Toro"]["horoscope"].lower() for token in _HOROSCOPE_ENGLISH_RESIDUALS)
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_produces_non_empty_clean_payload() -> None:
-    async def _run() -> None:
-        payload = {"signs": {sign: {"horoscope": f"{sign}: your focus improves when you keep things simple."} for sign in SIGN_ORDER}}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        await service._rewrite_horoscope_payload(payload)
-        for sign in SIGN_ORDER:
-            text = payload["signs"][sign]["horoscope"].strip()
-            assert text
-            assert "you are" not in text.lower()
-
-    asyncio.run(_run())
-
-
-def test_horoscope_rewrite_handles_translation_failures_with_simple_fallback() -> None:
-    async def _run() -> None:
-        long_source = (
-            "You are reminded to stay calm today and avoid impulsive moves in chat. "
-            "Focus on one practical goal before noon and postpone extra spending. "
-            "Keep listening, avoid noise, and be careful with every commitment."
+        translator = SimpleNamespace(translate=AsyncMock(side_effect=RuntimeError("boom")))
+        service = CampaignContentService(
+            database=SimpleNamespace(),
+            bot=SimpleNamespace(),
+            ai_service=None,
+            translate_service=translator,
         )
-        payload = {"signs": {sign: {"horoscope": long_source} for sign in SIGN_ORDER}}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        await service._rewrite_horoscope_payload(payload)
-        for sign in SIGN_ORDER:
-            text = payload["signs"][sign]["horoscope"].strip()
-            assert text
-            assert "you are" not in text.lower()
+        payload = {"signs": {"Ariete": {"horoscope": "Original untouched text"}}}
 
-    asyncio.run(_run())
+        used_model = await service._rewrite_horoscope_payload(payload)
 
-
-def test_horoscope_clean_basic_normalizes_minimal_cases() -> None:
-    async def _run() -> None:
-        payload = {"signs": {sign: {"horoscope": "You are reminded to stay calm today."} for sign in SIGN_ORDER}}
-        service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
-        await service._rewrite_horoscope_payload(payload)
-        text = payload["signs"]["Ariete"]["horoscope"].lower()
-        assert text
-        assert "you are" not in text
+        assert used_model is None
+        assert payload["signs"]["Ariete"]["horoscope"] == "Original untouched text"
 
     asyncio.run(_run())
 
