@@ -445,6 +445,25 @@ def test_build_horoscope_embeds_paginate_signs_and_respect_embed_limits() -> Non
     assert all(len(field.value or "") <= 1024 for embed in embeds for field in embed.fields)
 
 
+def test_build_horoscope_embeds_split_single_sign_without_trimming() -> None:
+    long_text = "Segmento esteso per verificare lo split tecnico senza modifiche. " * 30
+    payload = {"signs": {sign: {"horoscope": "ok", "confidence": 1.0} for sign in SIGN_ORDER}}
+    payload["signs"]["Ariete"] = {"horoscope": long_text, "confidence": 1.0}
+
+    embeds = build_horoscope_embeds({}, payload)
+    ariete_fields = [
+        field
+        for embed in embeds[1:]
+        for field in embed.fields
+        if "ARIETE" in (field.name or "")
+    ]
+    assert len(ariete_fields) >= 2
+    assert len(ariete_fields[0].value or "") <= 1024
+    assert all(len(field.value or "") <= 1024 for field in ariete_fields)
+    reconstructed = "".join(str(field.value or "") for field in ariete_fields)
+    assert reconstructed == f"- {long_text}"
+
+
 def test_build_horoscope_page_map_matches_embed_count() -> None:
     page_map = build_horoscope_page_map(4)
     assert page_map == [
