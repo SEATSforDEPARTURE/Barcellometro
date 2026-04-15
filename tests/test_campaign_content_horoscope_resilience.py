@@ -152,21 +152,49 @@ def test_execute_horoscope_service_uses_async_fetch_path() -> None:
         mocked_async_fetch.assert_awaited_once()
         metadata = json.loads(db.upsert_campaign_content_message.await_args.kwargs["metadata_json"])
         assert metadata["used_model"] is None
+        assert metadata["ai_model_used"] is None
 
     asyncio.run(_run())
 
 
-def test_horoscope_rewrite_uses_local_translation_and_cleans_english_residuals() -> None:
+def test_horoscope_rewrite_uses_valid_translation_and_cleans_sign_prefix() -> None:
     service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
     payload = {"signs": {"Ariete": {"horoscope": "Today focus on one task."}}}
 
     async def _run() -> None:
         with patch(
             "app.services.translate.opus_mt.OpusMtTranslateService.translate",
-            AsyncMock(return_value=SimpleNamespace(text="You are reminded to stay calm today.")),
+            AsyncMock(return_value=SimpleNamespace(text="Aries: Oggi concentrati su un solo compito e chiudilo bene.")),
         ):
             await service._rewrite_horoscope_payload(payload)
-        assert payload["signs"]["Ariete"]["horoscope"]
-        assert "you are" not in payload["signs"]["Ariete"]["horoscope"].lower()
+        final_text = payload["signs"]["Ariete"]["horoscope"]
+        assert final_text == "Oggi concentrati su un solo compito e chiudilo bene."
+        assert "aries:" not in final_text.lower()
+
+    asyncio.run(_run())
+
+
+def test_horoscope_rewrite_sets_unavailable_when_translation_stays_english() -> None:
+    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
+    payload = {"signs": {"Toro": {"horoscope": "Today with Venus and Jupiter you are lucky."}}}
+
+    async def _run() -> None:
+        with patch(
+            "app.services.translate.opus_mt.OpusMtTranslateService.translate",
+            AsyncMock(return_value=SimpleNamespace(text="Today with Venus and Jupiter you are lucky.")),
+        ):
+            await service._rewrite_horoscope_payload(payload)
+        assert payload["signs"]["Toro"]["horoscope"] == "Dati non disponibili per questo segno al momento."
+
+    asyncio.run(_run())
+
+
+def test_horoscope_rewrite_sets_unavailable_when_input_is_empty() -> None:
+    service = CampaignContentService(database=SimpleNamespace(), bot=SimpleNamespace(), ai_service=None)
+    payload = {"signs": {"Gemelli": {"horoscope": ""}}}
+
+    async def _run() -> None:
+        await service._rewrite_horoscope_payload(payload)
+        assert payload["signs"]["Gemelli"]["horoscope"] == "Dati non disponibili per questo segno al momento."
 
     asyncio.run(_run())
