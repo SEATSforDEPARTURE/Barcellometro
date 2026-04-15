@@ -144,6 +144,14 @@ def _split_field_value_to_fit_budget(value: str, *, budget: int) -> list[str]:
     )
 
 
+def _chunk_text_exact(text: str, *, limit: int) -> list[str]:
+    hard_limit = max(1, min(1024, limit))
+    raw_text = str(text or "")
+    if not raw_text:
+        return [raw_text]
+    return [raw_text[idx: idx + hard_limit] for idx in range(0, len(raw_text), hard_limit)]
+
+
 def enforce_embed_size_limit(embeds: list[discord.Embed]) -> list[discord.Embed]:
     bounded: list[discord.Embed] = []
     for embed_index, embed in enumerate(embeds):
@@ -1669,7 +1677,7 @@ def build_horoscope_embeds(config: dict[str, Any], payload: dict[str, Any]) -> l
         data = signs.get(sign, {})
         summary = _single_bullet(str(data.get("horoscope") or ""))
         field_name = format_standard_field_name(sign.upper(), emoji=SIGN_EMOJIS.get(sign, "✨"))
-        chunks = _split_field_value_to_fit_budget(summary, budget=1024)
+        chunks = _chunk_text_exact(summary, limit=1024)
         for idx, chunk in enumerate(chunks):
             chunk_name = field_name if idx == 0 else f"{field_name} (continua)"
             sign_fields.append((chunk_name, chunk))
