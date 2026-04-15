@@ -861,13 +861,9 @@ class CampaignContentService:
         return used_provider
 
     async def _rewrite_horoscope_payload(self, payload: dict[str, Any]) -> str | None:
-        from app.services.translate.opus_mt import OpusMtTranslateService
-
         signs = payload.get("signs", {})
         if not isinstance(signs, dict):
             return None
-
-        translator = OpusMtTranslateService()
 
         for sign, sign_payload in signs.items():
             if not isinstance(sign_payload, dict):
@@ -876,11 +872,20 @@ class CampaignContentService:
             if not source_text:
                 sign_payload["horoscope"] = _HOROSCOPE_UNAVAILABLE_TEXT
                 continue
+            translated = ""
             try:
-                translated_result = await translator.translate(source_text, "it", source_lang="en", backend="opusmt")
-                translated = str(translated_result.text or "").strip()
-            except Exception:
-                translated = ""
+                if self._translate is not None:
+                    translated_result = await self._translate.translate(source_text, "it", source_lang="en", backend="opusmt")
+                    translated = str(translated_result.text or "").strip()
+                else:
+                    from app.services.translate.opus_mt import OpusMtTranslateService
+
+                    translator = OpusMtTranslateService()
+                    translated_result = await translator.translate(source_text, "it", source_lang="en", backend="opusmt")
+                    translated = str(translated_result.text or "").strip()
+            except Exception as exc:
+                logger.warning("horoscope translation failed sign=%s backend=opusmt error=%s", sign, exc.__class__.__name__)
+
             sign_payload["horoscope"] = self._finalize_horoscope_translation(sign, source_text, translated)
         return None
 
@@ -888,52 +893,7 @@ class CampaignContentService:
         cleaned = self._strip_horoscope_sign_prefixes(sign, translated_text)
         if self._is_translation_usable(source_text, cleaned):
             return cleaned
-        conservative_fallback = self._build_horoscope_content_preserving_fallback(source_text)
-        if conservative_fallback:
-            return conservative_fallback
         return _HOROSCOPE_UNAVAILABLE_TEXT
-
-    def _build_horoscope_content_preserving_fallback(self, raw_text: str) -> str:
-        normalized = unescape(str(raw_text or "")).strip()
-        if not normalized:
-            return ""
-        cleaned = re.sub(r"\s+", " ", normalized).strip(" \t\r\n-•")
-        sign_labels = [*SIGN_ORDER, *[alias for alias in _HOROSCOPE_ENGLISH_ALIASES.values() if alias]]
-        for label in sign_labels:
-            cleaned = re.sub(rf"(?i)^\s*{re.escape(label)}\s*[:\-–|]+\s*", "", cleaned)
-        cleaned = re.sub(
-            r"(?i)^\s*(?:love|work|money|energy|friction|advice|amore|lavoro|soldi|energia|consiglio)\s*[:\-–|]+\s*",
-            "",
-            cleaned,
-        )
-        cleaned = re.sub(r"(?i)\b(?:horoscope|daily horoscope|today|dear)\b", " ", cleaned)
-        cleaned = re.sub(r"(?i)^\s*(?:you|your)\s+", "", cleaned).strip(" .,:;!-")
-        sentence = self._split_sentences(cleaned)
-        candidate = sentence[0] if sentence else cleaned
-        candidate = re.sub(r"\s+", " ", candidate).strip(" \t\r\n-•")
-        if not candidate:
-            return ""
-        tokens = re.findall(r"[a-zA-ZÀ-ÿ']+", candidate.lower())
-        if len(tokens) < 3:
-            return ""
-        specific_tokens = [
-            token for token in tokens if token not in _HOROSCOPE_RECOVERABLE_GENERIC_TOKENS and len(token) > 2
-        ]
-        if len(specific_tokens) < 2:
-            return ""
-        translated = candidate.lower()
-        translated = re.sub(r"(?i)\breconnect with someone from the past\b", "ritrovi contatti dal passato", translated)
-        translated = re.sub(r"(?i)\ba sweet message unblocks old tension\b", "un messaggio dolce scioglie vecchie tensioni", translated)
-        translated = re.sub(r"(?i)\byou are reminded to stay calm\b", "ricorda di restare calmo", translated)
-        for english, italian in _HOROSCOPE_CONTENT_WORD_TRANSLATIONS.items():
-            translated = re.sub(rf"(?i)\b{re.escape(english)}\b", italian, translated)
-        translated = re.sub(r"\s+", " ", translated).strip(" \t\r\n-•")
-        if not translated:
-            return ""
-        translated = translated[0].upper() + translated[1:]
-        if not translated.endswith((".", "!", "?")):
-            translated = f"{translated}."
-        return translated
 
     def _strip_horoscope_sign_prefixes(self, sign: str, text: str) -> str:
         cleaned = str(text or "").strip()
@@ -945,29 +905,35 @@ class CampaignContentService:
                 continue
             cleaned = re.sub(rf"(?i)^\s*{re.escape(prefix)}\s*[:\-–|]+\s*", "", cleaned)
             cleaned = re.sub(rf"(?i)^\s*{re.escape(prefix)}\s+", "", cleaned)
-        return re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = re.sub(
+            r"(?i)^\s*(?:love|work|money|energy|friction|advice|amore|lavoro|soldi|energia|consiglio|horoscope)\s*[:\-–|]+\s*",
+            "",
+            cleaned,
+        )
+        return re.sub(r"\s+", " ", cleaned).strip(" \t\r\n-•")
 
     def _is_translation_usable(self, source_text: str, translated_text: str) -> bool:
         normalized = str(translated_text or "").strip()
         if not normalized:
             return False
         useful_chars = re.sub(r"[^A-Za-zÀ-ÿ0-9]+", "", normalized)
-        if len(useful_chars) < 12:
+        if len(useful_chars) < 20:
             return False
         lowered = normalized.lower()
+        tokenized = re.findall(r"[a-zàèéìòù']+", lowered)
+        if len(tokenized) < 5:
+            return False
         padded = f" {lowered} "
         strong_english_hits = sum(1 for token in _HOROSCOPE_STRONG_ENGLISH_PATTERNS if f" {token} " in padded)
         if strong_english_hits >= 1:
             return False
-        tokenized = re.findall(r"[a-zàèéìòù']+", lowered)
-        if tokenized:
-            english_hits = sum(1 for token in tokenized if token in _COMMON_ENGLISH_NEWS_WORDS)
-            if english_hits >= 2:
-                return False
+        english_hits = sum(1 for token in tokenized if token in _COMMON_ENGLISH_NEWS_WORDS)
+        if english_hits >= 2:
+            return False
         source = str(source_text or "").strip().lower()
         if source:
             similarity = SequenceMatcher(a=source, b=lowered).ratio()
-            if similarity >= 0.94:
+            if similarity >= 0.90:
                 return False
         return True
 
