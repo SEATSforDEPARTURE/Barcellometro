@@ -443,6 +443,87 @@ def test_channel_schedule_show_and_list_include_embed_section() -> None:
     asyncio.run(_run())
 
 
+def test_channel_schedule_add_normalizes_multi_embed_section_csv() -> None:
+    async def _run() -> None:
+        db = SimpleNamespace(
+            set_channel_summary_auto_enabled=AsyncMock(),
+            create_channel_summary_schedule=AsyncMock(return_value=77),
+        )
+        ctx = SimpleNamespace(
+            database=db,
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=object(),
+            daily_activity_report=object(),
+            entitlements=SimpleNamespace(),
+        )
+        group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
+        old_permission = resoconto_module.check_permission
+        resoconto_module.check_permission = AsyncMock(return_value=True)
+        try:
+            register_resoconto(group, server_group, ctx)
+            callback = _get_command_callback(group, "schedule_add")
+            interaction = _FakeInteraction(qualified_name="channelsummary schedule_add")
+            await callback(
+                interaction,
+                schedule_kind=discord.app_commands.Choice(name="today", value="today"),
+                publish_at="02/03/2026 10:00",
+                embed_section="riassunto, panoramica",
+            )
+        finally:
+            resoconto_module.check_permission = old_permission
+
+        assert db.create_channel_summary_schedule.await_args.kwargs["embed_section"] == "panoramica,riassunto"
+
+    asyncio.run(_run())
+
+
+def test_channel_schedule_edit_normalizes_multi_embed_section_csv() -> None:
+    async def _run() -> None:
+        row = {
+            "id": 11,
+            "type": "oggi",
+            "embed_section": "aura",
+            "repeat_every_value": None,
+            "repeat_every_unit": None,
+            "status": "active",
+        }
+        db = SimpleNamespace(
+            get_channel_summary_schedule=AsyncMock(return_value=row),
+            update_channel_summary_schedule=AsyncMock(return_value=True),
+        )
+        ctx = SimpleNamespace(
+            database=db,
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=object(),
+            daily_activity_report=object(),
+            entitlements=SimpleNamespace(),
+        )
+        group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
+        old_permission = resoconto_module.check_permission
+        resoconto_module.check_permission = AsyncMock(return_value=True)
+        try:
+            register_resoconto(group, server_group, ctx)
+            callback = _get_command_callback(group, "schedule_edit")
+            interaction = _FakeInteraction(qualified_name="channelsummary schedule_edit")
+            await callback(
+                interaction,
+                schedule_id=11,
+                embed_section="aura,riassunto",
+            )
+        finally:
+            resoconto_module.check_permission = old_permission
+
+        assert db.update_channel_summary_schedule.await_args.kwargs["embed_section"] == "riassunto,aura"
+
+    asyncio.run(_run())
+
+
 def test_resocontoserver_status_uses_real_command_title() -> None:
     async def _run() -> None:
         db = SimpleNamespace(

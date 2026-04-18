@@ -316,10 +316,10 @@ def _bold_leading_actor(text: str, known_names: list[str] | None = None) -> str:
     return re.sub(r"^([^\s].*?)(\s+(?:ha|è|si|con|nel|in)\b)", r"**\1**\2", line, count=1, flags=re.IGNORECASE)
 
 
-def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, known_display_names: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False, aura_embed: discord.Embed | None = None) -> list[discord.Embed]:
+def build_channel_summary_overview_embed(*, barcello_status: BarcelloResult, barcello_line: str, window_header: str, trend_value: str | None = None) -> discord.Embed:
     color_label = (barcello_status.color or "nero").lower()
     color_map = {"verde": (0x2ECC71, "🟢", "VERDE"), "giallo": (0xF1C40F, "🟡", "GIALLA"), "rosso": (0xE74C3C, "🔴", "ROSSA"), "nero": (0x2F3136, "⚫", "NERA")}
-    embed_color, emoji, alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
+    embed_color, emoji, _alert_label = color_map.get(color_label, (0x2F3136, "⚫", color_label.upper()))
     period_text, range_text = _window_header_to_period_and_range(window_header)
     climate_description = _extract_climate_description(color_label=color_label, commentary=barcello_line)
     status_description = _build_channel_summary_overview_description(
@@ -334,12 +334,22 @@ def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name
         color=embed_color,
     )
     status_embed.add_field(name=format_standard_field_name("Punti salute", emoji="🫀"), value=f"{_render_health_bar(barcello_status.score, emoji)} ({barcello_status.score}/100)", inline=False)
-    trend_text = trend_value or render_trend_value(barcello_status.trend)
-    if trend_text:
-        status_embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=trend_text, inline=False)
+    resolved_trend = trend_value or render_trend_value(barcello_status.trend)
+    if resolved_trend:
+        status_embed.add_field(name=format_standard_field_name("Trend", emoji="📈"), value=resolved_trend, inline=False)
     attach_footer_meta(status_embed, service_name="channel_summary", used_local_processing=True)
     attach_author_meta(status_embed, service_name="channel_summary", canonical_top_level_command="channelsummary")
     attach_embed_images_meta(status_embed, service_name="channel_summary")
+    return status_embed
+
+
+def build_channel_summary_embeds(*, guild_id: int, channel_id: int, channel_name: str, barcello_status: BarcelloResult, barcello_line: str, summary_result: SummaryResult, message_index: dict[str, MessageMeta], advice_bullets: list[str], proverbio: str, window_header: str, moment_primary: dict[int, str | None], dynamic_primary: dict[int, str | None], dynamic_names: dict[int, list[str]], quote_render_items: list[QuoteRenderItem], moment_barcello: dict[int, BarcelloResult] | None = None, who_interacted_lines: list[str] | None = None, known_display_names: list[str] | None = None, trend_value: str | None = None, multi_day: bool = False, aura_embed: discord.Embed | None = None) -> list[discord.Embed]:
+    status_embed = build_channel_summary_overview_embed(
+        barcello_status=barcello_status,
+        barcello_line=barcello_line,
+        window_header=window_header,
+        trend_value=trend_value,
+    )
 
     pages: list[discord.Embed] = [
         discord.Embed(

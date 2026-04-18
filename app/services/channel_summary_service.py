@@ -14,7 +14,7 @@ import discord
 from app.services.footer import attach_footer_meta
 
 from app.plugins.commands_modular.time_windows import TimeWindowResult, infer_rolling_window_request, resolve_ieri_window, resolve_oggi_window
-from app.renderers.channel_summary import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, build_channel_summary_period_prefix, format_window_header
+from app.renderers.channel_summary import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, build_channel_summary_overview_embed, build_channel_summary_period_prefix, format_window_header
 from app.services.barcello_service import BarcelloResult, BarcelloService
 from app.services.aura import aura_reason_to_human
 from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
@@ -31,6 +31,50 @@ ROME_TZ = ZoneInfo("Europe/Rome")
 MIN_CHANNEL_SUMMARY_MESSAGES = 8
 MIN_CHANNEL_SUMMARY_DISTINCT_USERS = 2
 MIN_CHANNEL_SUMMARY_USABLE_CONTENT_MESSAGES = 5
+
+CHANNEL_SUMMARY_SECTION_ORDER: tuple[str, ...] = ("panoramica", "riassunto", "aura")
+CHANNEL_SUMMARY_SECTION_SET = set(CHANNEL_SUMMARY_SECTION_ORDER)
+CHANNEL_SUMMARY_LEGACY_FULL_SECTION_TOKENS = {"full", "legacy", "all"}
+
+
+def parse_channel_summary_embed_sections(raw: str | None, *, strict: bool = True) -> tuple[tuple[str, ...] | None, tuple[str, ...]]:
+    value = str(raw or "").strip().lower()
+    if not value:
+        return CHANNEL_SUMMARY_SECTION_ORDER, ()
+
+    tokens = [token.strip().lower() for token in value.split(",") if token.strip()]
+    if not tokens:
+        return CHANNEL_SUMMARY_SECTION_ORDER, ()
+    if any(token in CHANNEL_SUMMARY_LEGACY_FULL_SECTION_TOKENS for token in tokens):
+        return CHANNEL_SUMMARY_SECTION_ORDER, ()
+
+    invalid = tuple(sorted({token for token in tokens if token not in CHANNEL_SUMMARY_SECTION_SET}))
+    if invalid:
+        if strict:
+            return None, invalid
+        return CHANNEL_SUMMARY_SECTION_ORDER, invalid
+
+    selected = {token for token in tokens if token in CHANNEL_SUMMARY_SECTION_SET}
+    canonical = tuple(section for section in CHANNEL_SUMMARY_SECTION_ORDER if section in selected)
+    return canonical or CHANNEL_SUMMARY_SECTION_ORDER, ()
+
+
+def serialize_channel_summary_embed_sections(sections: tuple[str, ...]) -> str | None:
+    canonical = tuple(section for section in CHANNEL_SUMMARY_SECTION_ORDER if section in set(sections))
+    if canonical == CHANNEL_SUMMARY_SECTION_ORDER:
+        return None
+    return ",".join(canonical)
+
+
+def normalize_channel_summary_embed_section_input(raw: str | None, *, strict: bool = True) -> tuple[str | None, tuple[str, ...]]:
+    sections, invalid = parse_channel_summary_embed_sections(raw, strict=strict)
+    if sections is None:
+        return None, invalid
+    return serialize_channel_summary_embed_sections(sections), invalid
+
+
+def requires_channel_summary_ai(sections: tuple[str, ...]) -> bool:
+    return "riassunto" in set(sections)
 
 
 def _summary_footer_inputs(ai_status: dict[str, Any]) -> tuple[list[str], bool]:
@@ -413,24 +457,34 @@ class ChannelSummaryService:
 
         if window is None:
             window = resolve_oggi_window()
-        normalized_embed_section = str(embed_section or "").strip().lower() or None
-        if normalized_embed_section not in {None, "panoramica", "riassunto", "aura"}:
-            logger.warning("channel_summary invalid embed_section=%s guild=%s channel=%s", embed_section, guild_id, channel_id)
-            normalized_embed_section = None
+        requested_sections, invalid_tokens = parse_channel_summary_embed_sections(embed_section, strict=False)
+        if invalid_tokens:
+            logger.warning(
+                "channel_summary invalid embed_section=%s invalid_tokens=%s guild=%s channel=%s",
+                embed_section,
+                ",".join(invalid_tokens),
+                guild_id,
+                channel_id,
+            )
+        selected_sections = tuple(requested_sections or CHANNEL_SUMMARY_SECTION_ORDER)
+        needs_panoramica = "panoramica" in selected_sections
+        needs_riassunto = requires_channel_summary_ai(selected_sections)
+        needs_aura = "aura" in selected_sections
+        normalized_embed_section = serialize_channel_summary_embed_sections(selected_sections)
         now_local = datetime.now(ROME_TZ)
         start_local = window.start_dt.astimezone(ROME_TZ)
         end_local = window.end_dt.astimezone(ROME_TZ)
         start_dt = start_local.astimezone(timezone.utc)
         end_dt = end_local.astimezone(timezone.utc)
+        window_header = format_window_header(
+            period_label=window.period_label,
+            start_dt=start_local,
+            end_dt=end_local,
+            requested_quantity=window.requested_quantity,
+            requested_unit=window.requested_unit,
+        )
         logger.debug("channel_summary period guild=%s channel=%s start_utc=%s end_utc=%s", guild_id, channel_id, start_dt.isoformat(), end_dt.isoformat())
-        if normalized_embed_section == "aura":
-            window_header = format_window_header(
-                period_label=window.period_label,
-                start_dt=start_local,
-                end_dt=end_local,
-                requested_quantity=window.requested_quantity,
-                requested_unit=window.requested_unit,
-            )
+        if selected_sections == ("aura",):
             aura_embed = await self.build_channel_summary_aura_embed(
                 guild_id=guild_id,
                 channel_id=channel_id,
@@ -462,29 +516,30 @@ class ChannelSummaryService:
             logger.info("channel_summary sent_aura_only guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
             return True
 
-        rows = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=start_dt.isoformat(), end_ts=end_dt.isoformat(), limit=1200)
-        who_candidates, who_fallback_lines = await self._build_who_interacted_candidates(rows=rows, guild_id=guild_id)
-        messages = [
-            {
-                "ts": row["ts"],
-                "author_id": str(row["author_id"] or "") or None,
-                "content": str(row["content"] or ""),
-                "message_id": str(row["message_id"] or "") or None,
-                "meta": {"kind": "chat", "in_call": False},
-            }
-            for row in rows
-            if str(row["content"] or "").strip()
-        ]
+        rows: list[Any] = []
+        messages: list[dict[str, Any]] = []
+        who_candidates: list[dict[str, Any]] = []
+        who_fallback_lines: list[str] = []
+        if needs_riassunto:
+            rows = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=start_dt.isoformat(), end_ts=end_dt.isoformat(), limit=1200)
+            who_candidates, who_fallback_lines = await self._build_who_interacted_candidates(rows=rows, guild_id=guild_id)
+            messages = [
+                {
+                    "ts": row["ts"],
+                    "author_id": str(row["author_id"] or "") or None,
+                    "content": str(row["content"] or ""),
+                    "message_id": str(row["message_id"] or "") or None,
+                    "meta": {"kind": "chat", "in_call": False},
+                }
+                for row in rows
+                if str(row["content"] or "").strip()
+            ]
 
-        window_header = format_window_header(
-            period_label=window.period_label,
-            start_dt=start_local,
-            end_dt=end_local,
-            requested_quantity=window.requested_quantity,
-            requested_unit=window.requested_unit,
-        )
-        data_is_sufficient, data_counts = self._channel_summary_data_is_sufficient(rows=rows, messages=messages)
-        if not data_is_sufficient:
+        if needs_riassunto:
+            data_is_sufficient, data_counts = self._channel_summary_data_is_sufficient(rows=rows, messages=messages)
+        else:
+            data_is_sufficient, data_counts = True, {"messages": 0, "users": 0, "usable_messages": 0}
+        if needs_riassunto and not data_is_sufficient:
             logger.info(
                 "channel_summary skipped_ai_insufficient_data guild=%s channel=%s messages=%s users=%s usable_messages=%s",
                 guild_id,
@@ -525,38 +580,6 @@ class ChannelSummaryService:
             current_start_local=start_local,
             current_end_local=end_local,
         )
-        config = await self._summary.get_config()
-        ai_allowed = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)())
-        summary = await self._summary.build_summary(
-            guild_id=guild_id,
-            channel_id=channel_id,
-            start_ts=start_dt.isoformat(),
-            end_ts=end_dt.isoformat(),
-            tier="role3",
-            include_names=True,
-            ai_allowed=ai_allowed,
-            evidence_mode=False,
-            voice_context=False,
-            config=config,
-            barcello_metrics=bar.metrics,
-            max_message_ts=messages[-1]["ts"] if messages else None,
-            messages=messages,
-            granularity_hint="days",
-            summary_mode="channel_summary",
-            summary_context={
-                "period_label": window.period_label,
-                "score": bar.score,
-                "color": bar.color,
-                "barcello_verde": (bar.color == "verde" and int(bar.score) >= 70),
-                "nonce": f"{now_local.isoformat()}-{uuid4().hex[:10]}",
-                "who_interacted_candidates": who_candidates,
-                "trend_reason": "",
-                "signals": {
-                    "negative_hits": int((bar.metrics or {}).get("negativity_hits") or 0),
-                    "positive_hits": int((bar.metrics or {}).get("positive_hits") or 0),
-                },
-            },
-        )
 
         trend_value = self._build_trend_vs_previous_equivalent(
             bar_current=bar,
@@ -565,246 +588,308 @@ class ChannelSummaryService:
             current_end_local=end_local,
             period_label=window.period_label,
         )
-        barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, period_label=window.period_label)
-        advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
-        proverbio = str(getattr(summary, "proverbio", "") or "").strip()
-        if not advice or not proverbio:
-            fallback_advice, fallback_proverbio = self._fallback_advice_proverbio(bar.color)
-            if not advice:
-                advice = fallback_advice
-            if not proverbio:
-                proverbio = fallback_proverbio
-        who_lines = [str(line).strip() for line in (getattr(summary, "who_interacted_today", []) or []) if str(line).strip()][:8]
-        if not who_lines:
-            who_lines = who_fallback_lines[:8]
-        is_single_day_style = self._is_single_day_style(
-            period_label=window.period_label,
-            start_local=start_local,
-            end_local=end_local,
-        )
-        multi_day_style = not is_single_day_style
-
-        message_index: dict[str, MessageMeta] = {}
-        for row in rows:
-            message_id = str(row["message_id"] or "").strip()
-            if message_id:
-                message_index[message_id] = MessageMeta(
-                    message_id=message_id,
-                    ts=str(row["ts"] or "") or None,
-                    author_id=str(row["author_id"] or "") or None,
-                )
-
-        moment_primary: dict[int, str | None] = {}
-        quote_primary: dict[int, str | None] = {}
-        dynamic_primary: dict[int, str | None] = {}
-
-        for moment in summary.moments:
-            moment_primary[id(moment)] = await resolve_primary_message_id(
-                database=self._database,
-                channel_id=channel_id,
-                start_ts=start_dt.isoformat(),
-                end_ts=end_dt.isoformat(),
-                ts=moment.ts,
-                message_ids=moment.message_ids,
-            )
-        for quote in summary.quotes:
-            quote_primary[id(quote)] = await resolve_primary_message_id(
-                database=self._database,
-                channel_id=channel_id,
-                start_ts=start_dt.isoformat(),
-                end_ts=end_dt.isoformat(),
-                ts=quote.ts,
-                message_ids=quote.message_ids,
-            )
-        for dynamic in summary.dynamics:
-            dynamic_primary[id(dynamic)] = await resolve_primary_message_id(
-                database=self._database,
-                channel_id=channel_id,
-                start_ts=start_dt.isoformat(),
-                end_ts=end_dt.isoformat(),
-                ts=dynamic.ts,
-                message_ids=dynamic.message_ids,
-            )
-
-        message_cache: dict[str, dict[str, Any]] = {}
-        dynamic_names: dict[int, list[str]] = {}
-        is_green = (bar.color == "verde" and int(bar.score) >= 70)
-        for idx, moment in enumerate(summary.moments):
-            primary_id = moment_primary.get(id(moment))
-            display = safe_display_name(await resolve_display_name_from_message_id(
-                database=self._database,
+        barcello_line = self._ensure_past_tense_vibe(None, bar, period_label=window.period_label)
+        selected_embeds: list[discord.Embed] = []
+        if needs_riassunto:
+            config = await self._summary.get_config()
+            ai_allowed = bool(self._ai and getattr(self._ai, "is_enabled", lambda: False)())
+            summary = await self._summary.build_summary(
                 guild_id=guild_id,
                 channel_id=channel_id,
-                message_id=primary_id,
-                message_cache=message_cache,
-            ))
-            integrated = self._apply_author_placeholder(moment.text, display)
-            if is_green and display and self._contains_vague_actor(integrated):
-                integrated = re.sub(
-                    r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b",
-                    display,
-                    integrated,
-                    count=1,
-                    flags=re.IGNORECASE,
-                )
-            moment.text = self._bold_display_name(self._sanitize_moment_text(
-                integrated,
-                multi_day=multi_day_style,
-                moment_ts=moment.ts,
-                is_last=(idx == len(summary.moments) - 1),
-                ordinal=idx,
-            ), display)
+                start_ts=start_dt.isoformat(),
+                end_ts=end_dt.isoformat(),
+                tier="role3",
+                include_names=True,
+                ai_allowed=ai_allowed,
+                evidence_mode=False,
+                voice_context=False,
+                config=config,
+                barcello_metrics=bar.metrics,
+                max_message_ts=messages[-1]["ts"] if messages else None,
+                messages=messages,
+                granularity_hint="days",
+                summary_mode="channel_summary",
+                summary_context={
+                    "period_label": window.period_label,
+                    "score": bar.score,
+                    "color": bar.color,
+                    "barcello_verde": (bar.color == "verde" and int(bar.score) >= 70),
+                    "nonce": f"{now_local.isoformat()}-{uuid4().hex[:10]}",
+                    "who_interacted_candidates": who_candidates,
+                    "trend_reason": "",
+                    "signals": {
+                        "negative_hits": int((bar.metrics or {}).get("negativity_hits") or 0),
+                        "positive_hits": int((bar.metrics or {}).get("positive_hits") or 0),
+                    },
+                },
+            )
 
-        for dynamic in summary.dynamics:
-            names: list[str] = []
-            seen: set[str] = set()
-            candidate_ids = [dynamic_primary.get(id(dynamic)), *dynamic.message_ids]
-            for candidate in candidate_ids:
+            barcello_line = self._ensure_past_tense_vibe(getattr(summary, "vibe_line", None), bar, period_label=window.period_label)
+            advice = [str(x).strip()[:160] for x in (getattr(summary, "advice", []) or []) if str(x).strip()][:5]
+            proverbio = str(getattr(summary, "proverbio", "") or "").strip()
+            if not advice or not proverbio:
+                fallback_advice, fallback_proverbio = self._fallback_advice_proverbio(bar.color)
+                if not advice:
+                    advice = fallback_advice
+                if not proverbio:
+                    proverbio = fallback_proverbio
+            who_lines = [str(line).strip() for line in (getattr(summary, "who_interacted_today", []) or []) if str(line).strip()][:8]
+            if not who_lines:
+                who_lines = who_fallback_lines[:8]
+            is_single_day_style = self._is_single_day_style(
+                period_label=window.period_label,
+                start_local=start_local,
+                end_local=end_local,
+            )
+            multi_day_style = not is_single_day_style
+
+            message_index: dict[str, MessageMeta] = {}
+            for row in rows:
+                message_id = str(row["message_id"] or "").strip()
+                if message_id:
+                    message_index[message_id] = MessageMeta(
+                        message_id=message_id,
+                        ts=str(row["ts"] or "") or None,
+                        author_id=str(row["author_id"] or "") or None,
+                    )
+
+            moment_primary: dict[int, str | None] = {}
+            quote_primary: dict[int, str | None] = {}
+            dynamic_primary: dict[int, str | None] = {}
+
+            for moment in summary.moments:
+                moment_primary[id(moment)] = await resolve_primary_message_id(
+                    database=self._database,
+                    channel_id=channel_id,
+                    start_ts=start_dt.isoformat(),
+                    end_ts=end_dt.isoformat(),
+                    ts=moment.ts,
+                    message_ids=moment.message_ids,
+                )
+            for quote in summary.quotes:
+                quote_primary[id(quote)] = await resolve_primary_message_id(
+                    database=self._database,
+                    channel_id=channel_id,
+                    start_ts=start_dt.isoformat(),
+                    end_ts=end_dt.isoformat(),
+                    ts=quote.ts,
+                    message_ids=quote.message_ids,
+                )
+            for dynamic in summary.dynamics:
+                dynamic_primary[id(dynamic)] = await resolve_primary_message_id(
+                    database=self._database,
+                    channel_id=channel_id,
+                    start_ts=start_dt.isoformat(),
+                    end_ts=end_dt.isoformat(),
+                    ts=dynamic.ts,
+                    message_ids=dynamic.message_ids,
+                )
+
+            message_cache: dict[str, dict[str, Any]] = {}
+            dynamic_names: dict[int, list[str]] = {}
+            is_green = (bar.color == "verde" and int(bar.score) >= 70)
+            for idx, moment in enumerate(summary.moments):
+                primary_id = moment_primary.get(id(moment))
                 display = safe_display_name(await resolve_display_name_from_message_id(
                     database=self._database,
                     guild_id=guild_id,
                     channel_id=channel_id,
-                    message_id=candidate,
+                    message_id=primary_id,
                     message_cache=message_cache,
                 ))
-                if display and display not in seen:
-                    names.append(display)
-                    seen.add(display)
-                if len(names) >= 3:
-                    break
-            dynamic_names[id(dynamic)] = names
-            primary_display = names[0] if names else None
-            dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
-            if "{AUTHOR}" in dynamic_text:
-                dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
-            dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day_style, moment_ts=dynamic.ts), primary_display)
+                integrated = self._apply_author_placeholder(moment.text, display)
+                if is_green and display and self._contains_vague_actor(integrated):
+                    integrated = re.sub(
+                        r"\b(un membro|una persona|qualcuno|diverse persone|alcuni membri)\b",
+                        display,
+                        integrated,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                moment.text = self._bold_display_name(self._sanitize_moment_text(
+                    integrated,
+                    multi_day=multi_day_style,
+                    moment_ts=moment.ts,
+                    is_last=(idx == len(summary.moments) - 1),
+                    ordinal=idx,
+                ), display)
 
-        for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
-            if message_id in message_index:
-                continue
-            record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
-            if record:
-                message_index[message_id] = MessageMeta(
-                    message_id=message_id,
-                    ts=str(record["ts"] or "") or None,
-                    author_id=str(record["author_id"] or "") or None,
-                )
-
-        quote_render_items: list[QuoteRenderItem] = []
-        for quote in summary.quotes:
-            primary_id = quote_primary.get(id(quote))
-            quote_text: str | None = None
-            quote_ts: str | None = quote.ts
-            author_display: str | None = None
-
-            if primary_id:
-                record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=primary_id)
-                if record:
-                    raw_content = str(record["content"] or "")
-                    compact = " ".join(raw_content.split()).replace("```", "'''")
-                    if compact:
-                        quote_text = compact[:319] + "…" if len(compact) > 320 else compact
-                    quote_ts = str(record["ts"] or "") or quote_ts
-                    author_display = safe_display_name(await resolve_display_name_from_message_id(
+            for dynamic in summary.dynamics:
+                names: list[str] = []
+                seen: set[str] = set()
+                candidate_ids = [dynamic_primary.get(id(dynamic)), *dynamic.message_ids]
+                for candidate in candidate_ids:
+                    display = safe_display_name(await resolve_display_name_from_message_id(
                         database=self._database,
                         guild_id=guild_id,
                         channel_id=channel_id,
-                        message_id=primary_id,
+                        message_id=candidate,
                         message_cache=message_cache,
                     ))
+                    if display and display not in seen:
+                        names.append(display)
+                        seen.add(display)
+                    if len(names) >= 3:
+                        break
+                dynamic_names[id(dynamic)] = names
+                primary_display = names[0] if names else None
+                dynamic_text = self._apply_author_placeholder(dynamic.text, primary_display)
+                if "{AUTHOR}" in dynamic_text:
+                    dynamic_text = self._cleanup_placeholder_artifacts(dynamic_text.replace("{AUTHOR}", ""), had_author_placeholder=True, has_display_name=False)
+                dynamic.text = self._bold_display_name(self._sanitize_moment_text(dynamic_text, multi_day=multi_day_style, moment_ts=dynamic.ts), primary_display)
 
-            if not quote_text:
-                fallback = str(quote.text or "").strip()
-                looks_quote = fallback.startswith(('"', "“", "'")) or fallback.endswith(('"', "”", "'"))
-                if looks_quote and len(fallback) <= 320:
-                    quote_text = fallback.strip('"”\'“ ')
-            if not quote_text:
-                continue
+            for message_id in {m for m in [*moment_primary.values(), *quote_primary.values(), *dynamic_primary.values()] if m}:
+                if message_id in message_index:
+                    continue
+                record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=message_id)
+                if record:
+                    message_index[message_id] = MessageMeta(
+                        message_id=message_id,
+                        ts=str(record["ts"] or "") or None,
+                        author_id=str(record["author_id"] or "") or None,
+                    )
 
-            quote_render_items.append(
-                QuoteRenderItem(
-                    message_id=primary_id,
-                    ts=quote_ts,
-                    quote_text=quote_text,
-                    author_display=author_display,
+            quote_render_items: list[QuoteRenderItem] = []
+            for quote in summary.quotes:
+                primary_id = quote_primary.get(id(quote))
+                quote_text: str | None = None
+                quote_ts: str | None = quote.ts
+                author_display: str | None = None
+
+                if primary_id:
+                    record = await self._database.fetch_message_by_id(channel_id=channel_id, message_id=primary_id)
+                    if record:
+                        raw_content = str(record["content"] or "")
+                        compact = " ".join(raw_content.split()).replace("```", "'''")
+                        if compact:
+                            quote_text = compact[:319] + "…" if len(compact) > 320 else compact
+                        quote_ts = str(record["ts"] or "") or quote_ts
+                        author_display = safe_display_name(await resolve_display_name_from_message_id(
+                            database=self._database,
+                            guild_id=guild_id,
+                            channel_id=channel_id,
+                            message_id=primary_id,
+                            message_cache=message_cache,
+                        ))
+
+                if not quote_text:
+                    fallback = str(quote.text or "").strip()
+                    looks_quote = fallback.startswith(('"', "“", "'")) or fallback.endswith(('"', "”", "'"))
+                    if looks_quote and len(fallback) <= 320:
+                        quote_text = fallback.strip('"”\'“ ')
+                if not quote_text:
+                    continue
+
+                quote_render_items.append(
+                    QuoteRenderItem(
+                        message_id=primary_id,
+                        ts=quote_ts,
+                        quote_text=quote_text,
+                        author_display=author_display,
+                    )
                 )
+
+            moment_barcello = await self._compute_moment_barcello_map(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                summary=summary,
+                moment_primary=moment_primary,
+                message_index=message_index,
+                fallback=bar,
             )
 
-        moment_barcello = await self._compute_moment_barcello_map(
-            guild_id=guild_id,
-            channel_id=channel_id,
-            summary=summary,
-            moment_primary=moment_primary,
-            message_index=message_index,
-            fallback=bar,
-        )
+            channel_name = getattr(channel, "name", None) or channel_id
+            known_display_names = sorted({name for names in dynamic_names.values() for name in names if str(name).strip()}, key=len, reverse=True)
+            aura_embed = None
+            if needs_aura:
+                aura_embed = await self.build_channel_summary_aura_embed(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    start_local=start_local,
+                    end_local=end_local,
+                    window_header=window_header,
+                )
 
-        channel_name = getattr(channel, "name", None) or channel_id
-        known_display_names = sorted({name for names in dynamic_names.values() for name in names if str(name).strip()}, key=len, reverse=True)
+            embeds = build_channel_summary_embeds(
+                guild_id=int(guild_id),
+                channel_id=int(channel_id),
+                channel_name=str(channel_name),
+                barcello_status=bar,
+                barcello_line=barcello_line,
+                summary_result=summary,
+                message_index=message_index,
+                advice_bullets=advice,
+                proverbio=proverbio,
+                window_header=window_header,
+                moment_primary=moment_primary,
+                dynamic_primary=dynamic_primary,
+                dynamic_names=dynamic_names,
+                quote_render_items=quote_render_items,
+                moment_barcello=moment_barcello,
+                trend_value=trend_value,
+                who_interacted_lines=who_lines,
+                known_display_names=known_display_names,
+                multi_day=multi_day_style,
+                aura_embed=aura_embed,
+            )
 
-        aura_embed = await self.build_channel_summary_aura_embed(
-            guild_id=guild_id,
-            channel_id=channel_id,
-            start_local=start_local,
-            end_local=end_local,
-            window_header=window_header,
-        )
-
-        embeds = build_channel_summary_embeds(
-            guild_id=int(guild_id),
-            channel_id=int(channel_id),
-            channel_name=str(channel_name),
-            barcello_status=bar,
-            barcello_line=barcello_line,
-            summary_result=summary,
-            message_index=message_index,
-            advice_bullets=advice,
-            proverbio=proverbio,
-            window_header=window_header,
-            moment_primary=moment_primary,
-            dynamic_primary=dynamic_primary,
-            dynamic_names=dynamic_names,
-            quote_render_items=quote_render_items,
-            moment_barcello=moment_barcello,
-            trend_value=trend_value,
-            who_interacted_lines=who_lines,
-            known_display_names=known_display_names,
-            multi_day=multi_day_style,
-            aura_embed=aura_embed,
-        )
-
-        footer_contributors, footer_local = _summary_footer_inputs(summary.ai_status)
-
-        attach_footer_meta(
-            embeds[0],
-            service_name="channel_summary",
-            contributors=footer_contributors,
-            used_local_processing=footer_local,
-        )
-        if len(embeds) >= 2:
+            footer_contributors, footer_local = _summary_footer_inputs(summary.ai_status)
             attach_footer_meta(
-                embeds[1],
+                embeds[0],
                 service_name="channel_summary",
                 contributors=footer_contributors,
                 used_local_processing=footer_local,
             )
-        if len(embeds) >= 3:
-            aura_chars_final = _estimate_embed_size(embeds[2])
-            logger.debug("aura_embed_chars_final_with_footer=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
-            if aura_chars_final > 5800:
-                logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
-                embeds = embeds[:2]
-        selected_embeds = embeds
-        if normalized_embed_section == "panoramica":
-            selected_embeds = embeds[:1]
-        elif normalized_embed_section == "riassunto":
-            selected_embeds = embeds[1:2]
-            if selected_embeds:
+            if len(embeds) >= 2:
+                attach_footer_meta(
+                    embeds[1],
+                    service_name="channel_summary",
+                    contributors=footer_contributors,
+                    used_local_processing=footer_local,
+                )
+            if len(embeds) >= 3 and needs_aura:
+                aura_chars_final = _estimate_embed_size(embeds[2])
+                logger.debug("aura_embed_chars_final_with_footer=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
+                if aura_chars_final > 5800:
+                    logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
+                    embeds = embeds[:2]
+
+            embed_by_section = {
+                "panoramica": embeds[0],
+                "riassunto": embeds[1],
+            }
+            if needs_aura and len(embeds) >= 3:
+                embed_by_section["aura"] = embeds[2]
+            selected_embeds = [embed_by_section[section] for section in selected_sections if section in embed_by_section]
+            if selected_sections == ("riassunto",) and selected_embeds:
                 selected_embeds[0].description = self._build_standalone_riassunto_description(window_header=window_header)
-        if normalized_embed_section in {"panoramica", "riassunto"}:
-            await finalize_embeds_author(selected_embeds, None, default_service_name="channel_summary")
         else:
-            await finalize_embeds_author(embeds, None, default_service_name="channel_summary")
+            if needs_panoramica:
+                selected_embeds.append(
+                    build_channel_summary_overview_embed(
+                        barcello_status=bar,
+                        barcello_line=barcello_line,
+                        window_header=window_header,
+                        trend_value=trend_value,
+                    )
+                )
+            if needs_aura:
+                aura_embed = await self.build_channel_summary_aura_embed(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    start_local=start_local,
+                    end_local=end_local,
+                    window_header=window_header,
+                    standalone_description=(len(selected_sections) == 1),
+                )
+                if aura_embed is not None:
+                    selected_embeds.append(aura_embed)
+
+        if not selected_embeds:
+            logger.info("channel_summary no_embeds_to_send guild=%s channel=%s sections=%s", guild_id, channel_id, ",".join(selected_sections))
+            return False
+
+        await finalize_embeds_author(selected_embeds, None, default_service_name="channel_summary")
         try:
             if len(selected_embeds) >= 3:
                 first_batch = selected_embeds[:2]

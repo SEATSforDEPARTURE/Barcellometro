@@ -170,6 +170,21 @@ def test_channel_summary_schedule_persists_embed_section() -> None:
             updated = await db.get_channel_summary_schedule(schedule_id=schedule_id, guild_id="1", channel_id="2")
             assert updated is not None
             assert updated["embed_section"] is None
+
+            ok_csv = await db.update_channel_summary_schedule(
+                schedule_id=schedule_id,
+                guild_id="1",
+                channel_id="2",
+                publish_at=None,
+                embed_section="panoramica,riassunto",
+                repeat_every_value=None,
+                repeat_every_unit=None,
+                status="active",
+            )
+            assert ok_csv is True
+            csv_row = await db.get_channel_summary_schedule(schedule_id=schedule_id, guild_id="1", channel_id="2")
+            assert csv_row is not None
+            assert csv_row["embed_section"] == "panoramica,riassunto"
         finally:
             await db.close()
 
