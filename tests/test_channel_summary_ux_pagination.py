@@ -6,6 +6,7 @@ from app.renderers.channel_summary import (
     MessageMeta,
     QuoteRenderItem,
     _rolling_period_to_italian,
+    build_channel_summary_period_prefix,
     build_channel_summary_embeds,
     build_channel_summary_insufficient_data_embed,
 )
@@ -79,6 +80,23 @@ def test_channel_summary_aura_embed_is_included_in_global_author_pagination() ->
         embeds = _build_fixture_embeds()
         await finalize_embeds_author(embeds, None, default_service_name="channel_summary")
         assert embeds[2].author.name == "servizio CHANNEL SUMMARY · (Pag. 3/3)"
+
+    asyncio.run(_run())
+
+
+def test_channel_summary_standalone_riassunto_has_period_prefix_and_no_pagination() -> None:
+    async def _run() -> None:
+        embeds = _build_fixture_embeds()
+        summary_embed = embeds[1]
+        period_prefix = build_channel_summary_period_prefix("**🗓️ Oggi. Venerdì, 3 Aprile 2026**")
+        summary_embed.description = f"*{period_prefix} Andiamo a leggere cosa è successo...*"
+
+        await finalize_embeds_author([summary_embed], None, default_service_name="channel_summary")
+
+        assert summary_embed.author.name == "servizio CHANNEL SUMMARY"
+        assert "Pag." not in (summary_embed.author.name or "")
+        assert (summary_embed.description or "").startswith("*Oggi.")
+        assert "Andiamo a leggere cosa è successo..." in (summary_embed.description or "")
 
     asyncio.run(_run())
 

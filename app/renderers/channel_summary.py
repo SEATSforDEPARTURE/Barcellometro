@@ -220,6 +220,14 @@ def _window_header_to_period_and_range(window_header: str) -> tuple[str, str | N
     return period_raw, None
 
 
+def build_channel_summary_period_prefix(window_header: str) -> str:
+    period_text, range_text = _window_header_to_period_and_range(window_header)
+    period_prefix = period_text.strip().rstrip(".")
+    if range_text:
+        return f"{period_prefix} ({range_text})."
+    return f"{period_prefix}."
+
+
 def _extract_climate_description(*, color_label: str, commentary: str) -> str:
     climate = _sanitize_barcello_commentary(commentary)
     climate = re.sub(r"(?i)\b(?:nel\s+)?periodo selezionato\b", "", climate)
