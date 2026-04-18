@@ -20,6 +20,7 @@ from app.plugins.commands_modular.time_windows import (
     resolve_ultimi_window,
 )
 from app.services.aura import aura_reason_to_human
+from app.services.channel_summary_service import normalize_channel_summary_embed_section_input
 from app.services.footer import attach_footer_meta
 from app.shared.discord.embed_body import format_standard_description, format_standard_field_name, format_standard_title
 from app.shared.discord.report_embeds import apply_standard_report_style
@@ -38,7 +39,6 @@ LAST_UNIT_TO_INTERNAL = {
     "days": "giorni",
     "weeks": "settimane",
 }
-SUPPORTED_EMBED_SECTIONS = {"panoramica", "riassunto", "aura"}
 LOCALE_COMMANDS = {
     "en": {
         "today": "today",
@@ -383,13 +383,8 @@ def register_resoconto(
             return None, None
         return int(match.group(1)), match.group(2)
 
-    def _normalize_embed_section(raw: str | None) -> str | None:
-        value = str(raw or "").strip().lower()
-        if not value:
-            return None
-        if value in {"full", "legacy", "all"}:
-            return None
-        return value if value in SUPPORTED_EMBED_SECTIONS else None
+    def _normalize_embed_section(raw: str | None) -> tuple[str | None, tuple[str, ...]]:
+        return normalize_channel_summary_embed_section_input(raw, strict=True)
 
     def _fmt_schedule_ts(ts: str | None) -> str:
         if not ts:
@@ -560,9 +555,14 @@ def register_resoconto(
         if publish_at_dt is None:
             await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Invalid `publish_at` format. Use DD/MM/YYYY HH:MM.")
             return
-        normalized_embed_section = _normalize_embed_section(embed_section)
-        if embed_section is not None and normalized_embed_section is None:
-            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Invalid `embed_section`. Use panoramica, riassunto, or aura.")
+        normalized_embed_section, invalid_sections = _normalize_embed_section(embed_section)
+        if invalid_sections:
+            await _send_message(
+                interaction,
+                scope="canale",
+                path="schedule_add",
+                message="❌ Invalid `embed_section`. Sezioni valide: panoramica, riassunto, aura.",
+            )
             return
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
@@ -650,7 +650,7 @@ def register_resoconto(
     @resocontocanale_group.command(name="schedule_add", description="Add a channel summary schedule.")
     @app_commands.describe(
         schedule_kind="Schedule window type: today, yesterday, last, or range.",
-        embed_section="Optional single embed section: panoramica, riassunto, aura.",
+        embed_section="Optional embed section(s), CSV: panoramica,riassunto,aura.",
         publish_at="First publish date and time in DD/MM/YYYY HH:MM.",
         every="Optional repeat interval like 1440min, 24hours, or 1days.",
         quantity="Required when schedule_kind is `last`.",
@@ -671,18 +671,12 @@ def register_resoconto(
             app_commands.Choice(name="days", value="days"),
             app_commands.Choice(name="weeks", value="weeks"),
         ],
-        embed_section=[
-            app_commands.Choice(name="full", value="full"),
-            app_commands.Choice(name="panoramica", value="panoramica"),
-            app_commands.Choice(name="riassunto", value="riassunto"),
-            app_commands.Choice(name="aura", value="aura"),
-        ],
     )
     async def canale_schedule_add(
         interaction: discord.Interaction,
         schedule_kind: app_commands.Choice[str],
         publish_at: str,
-        embed_section: app_commands.Choice[str] | None = None,
+        embed_section: str | None = None,
         every: str | None = None,
         quantity: int | None = None,
         unit: app_commands.Choice[str] | None = None,
@@ -692,7 +686,7 @@ def register_resoconto(
         await _create_channel_schedule(
             interaction,
             schedule_kind=schedule_kind.value,
-            embed_section=embed_section.value if embed_section else None,
+            embed_section=embed_section,
             publish_at=publish_at,
             every=every,
             quantity=quantity,
@@ -704,23 +698,15 @@ def register_resoconto(
     @resocontocanale_group.command(name="schedule_edit", description="Edit a channel summary schedule.")
     @app_commands.describe(
         schedule_id="Schedule ID to update.",
-        embed_section="Optional single embed section: panoramica, riassunto, aura. Empty keeps full summary.",
+        embed_section="Optional embed section(s), CSV: panoramica,riassunto,aura. Empty keeps full summary.",
         publish_at="Optional new publish date and time in DD/MM/YYYY HH:MM.",
         every="Optional repeat interval like 1440min, 24hours, 1days, off, or none.",
         enabled="Optional enabled state for the schedule.",
     )
-    @app_commands.choices(
-        embed_section=[
-            app_commands.Choice(name="full", value="full"),
-            app_commands.Choice(name="panoramica", value="panoramica"),
-            app_commands.Choice(name="riassunto", value="riassunto"),
-            app_commands.Choice(name="aura", value="aura"),
-        ]
-    )
     async def canale_schedule_edit(
         interaction: discord.Interaction,
         schedule_id: int,
-        embed_section: app_commands.Choice[str] | None = None,
+        embed_section: str | None = None,
         publish_at: str | None = None,
         every: str | None = None,
         enabled: bool | None = None,
@@ -749,9 +735,17 @@ def register_resoconto(
         if every is None:
             every_value = int(row["repeat_every_value"]) if row["repeat_every_value"] is not None else None
             every_unit = str(row["repeat_every_unit"] or "") or None
-        normalized_embed_section = _normalize_embed_section(embed_section.value if embed_section else None)
+        normalized_embed_section, invalid_sections = _normalize_embed_section(embed_section)
+        if invalid_sections:
+            await _send_message(
+                interaction,
+                scope="canale",
+                path="schedule_edit",
+                message="❌ Invalid `embed_section`. Sezioni valide: panoramica, riassunto, aura.",
+            )
+            return
         if embed_section is None:
-            normalized_embed_section = str(row["embed_section"] or "").strip().lower() or None
+            normalized_embed_section, _invalid_saved = _normalize_embed_section(str(row["embed_section"] or "").strip().lower() or None)
         status_value = "active" if enabled else "disabled" if enabled is not None else None
         ok = await ctx.database.update_channel_summary_schedule(
             schedule_id=schedule_id,
