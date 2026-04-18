@@ -140,11 +140,45 @@ def test_full_report_channel_aura_embed_keeps_multipage_description_style() -> N
             window_header="**🗓️ Oggi. Giovedì, 16 Aprile 2026**",
         )
         assert embed is not None
-        assert (embed.description or "").startswith("*Oggi. ")
-        assert "Nel periodo di riferimento" in (embed.description or "")
+        assert (embed.description or "").startswith("*Nel periodo di riferimento")
+        assert "Oggi." not in (embed.description or "")
 
     asyncio.run(_run())
 
+
+
+
+def test_channel_summary_aura_embed_uses_standalone_description_only_for_single_embed() -> None:
+    async def _run() -> None:
+        service = _service()
+        window_header = "**🗓️ Oggi. Giovedì, 16 Aprile 2026**"
+
+        standalone = await service.build_channel_summary_aura_embed(
+            guild_id="1",
+            channel_id="2",
+            start_local=datetime(2026, 4, 16, 0, 0),
+            end_local=datetime(2026, 4, 16, 23, 59),
+            window_header=window_header,
+            standalone_description=True,
+        )
+        multipage = await service.build_channel_summary_aura_embed(
+            guild_id="1",
+            channel_id="2",
+            start_local=datetime(2026, 4, 16, 0, 0),
+            end_local=datetime(2026, 4, 16, 23, 59),
+            window_header=window_header,
+            standalone_description=False,
+        )
+
+        assert standalone is not None
+        assert multipage is not None
+        assert (standalone.description or "").startswith("**Oggi.")
+        assert "Nel periodo di riferimento" not in (standalone.description or "")
+        assert (multipage.description or "").startswith("*Nel periodo di riferimento")
+        assert "**Oggi." not in (multipage.description or "")
+        assert "Oggi. " not in (multipage.description or "")
+
+    asyncio.run(_run())
 
 def test_channel_summary_aura_karma_uses_average_of_eligible_participants() -> None:
     async def _run() -> None:
