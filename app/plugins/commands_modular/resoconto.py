@@ -434,13 +434,14 @@ def register_resoconto(
         return schedule_type
 
     def _format_schedule_line(row: dict[str, object], *, key: str) -> str:
+        schedule_type = str(row.get(key) or row.get("type") or row.get("schedule_type") or "oggi")
         recurrence = (
             f"every {row['repeat_every_value']}{row['repeat_every_unit']}"
             if row.get("repeat_every_value")
             else "one-shot"
         )
         return (
-            f"id={row['id']} | status={str(row.get('status') or 'active')} | window={_format_window_details(row, key)} | "
+            f"id={row['id']} | type={schedule_type} | status={str(row.get('status') or 'active')} | window={_format_window_details(row, key)} | "
             f"publish_at={_fmt_schedule_ts(str(row.get('publish_at') or ''))} | next_run_at={_fmt_schedule_ts(str(row.get('next_run_at') or ''))} | "
             f"every={recurrence} | embed_section={str(row.get('embed_section') or 'full')}"
         )

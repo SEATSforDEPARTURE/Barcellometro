@@ -17,8 +17,9 @@ def test_command_validator_tracks_expected_alias_exceptions() -> None:
     result = validate_command_tree()
 
     expected = {
-        "resocontocanale.oggi",
-        "resocontoserver.oggi",
+        "resocontocanale.schedule_add",
+        "resocontoserver.schedule_show",
+        "barcello.oggi",
         "dmchannelsummary.barcello.last",
     }
     assert expected.issubset(result.exceptions)
