@@ -5,14 +5,16 @@ def test_resoconto_restores_top_level_manual_commands() -> None:
     source = Path("app/plugins/commands_modular/resoconto.py").read_text()
 
     for pattern in [
-        '@resocontocanale_group.command(name="oggi"',
-        '@resocontocanale_group.command(name="ieri"',
-        '@resocontocanale_group.command(name="ultimi"',
-        '@resocontocanale_group.command(name="range"',
-        '@resocontoserver_group.command(name="oggi"',
-        '@resocontoserver_group.command(name="ieri"',
-        '@resocontoserver_group.command(name="ultimi"',
-        '@resocontoserver_group.command(name="range"',
+        '"range": "range"',
+        '"range": "intervallo"',
+        '@resocontocanale_group.command(name=channel_cmd["today"]',
+        '@resocontocanale_group.command(name=channel_cmd["yesterday"]',
+        '@resocontocanale_group.command(name=channel_cmd["last"]',
+        '@resocontocanale_group.command(name=channel_cmd["range"]',
+        '@resocontoserver_group.command(name=server_cmd["today"]',
+        '@resocontoserver_group.command(name=server_cmd["yesterday"]',
+        '@resocontoserver_group.command(name=server_cmd["last"]',
+        '@resocontoserver_group.command(name=server_cmd["range"]',
         'canale_aura_group = app_commands.Group(name="aura"',
         'server_aura_group = app_commands.Group(name="aura"',
     ]:

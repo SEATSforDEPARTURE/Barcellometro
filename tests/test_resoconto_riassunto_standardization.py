@@ -171,7 +171,7 @@ def test_resoconto_manual_paths_are_locale_specific_for_canonical_and_alias_root
 
     channel_aura = _get_subgroup(channel_group, "aura")
     assert {"today", "yesterday", "last", "range"}.issubset({cmd.name for cmd in channel_aura.commands})
-    assert {"oggi", "ieri", "ultimi", "intervallo", "range"}.isdisjoint({cmd.name for cmd in channel_aura.commands})
+    assert {"oggi", "ieri", "ultimi", "intervallo"}.isdisjoint({cmd.name for cmd in channel_aura.commands})
 
     alias_channel_names = {cmd.name for cmd in alias_channel_group.commands}
     assert {"oggi", "ieri", "ultimi", "intervallo"}.issubset(alias_channel_names)
