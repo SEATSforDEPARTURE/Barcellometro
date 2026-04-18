@@ -607,6 +607,8 @@ def _compose_channel_aura_embed(
     compact_missions: bool,
     compact_advice: bool,
     footer_text: str | None,
+    service_name: str,
+    canonical_top_level_command: str | None,
 ) -> discord.Embed:
     title_base = re.sub(r"[*_`]", "", str(title or "")).replace("📓", "").strip() or "RESOCONTO CANALE · AURA"
     embed = discord.Embed(
@@ -667,9 +669,9 @@ def _compose_channel_aura_embed(
 
     if footer_text:
         logger.debug("aura_footer_note_delegated_to_central_pipeline=%s", footer_text)
-    attach_footer_meta(embed, service_name="aura", used_local_processing=True)
-    attach_author_meta(embed, service_name="aura", canonical_top_level_command="dmserversummary")
-    attach_embed_images_meta(embed, service_name="aura")
+    attach_footer_meta(embed, service_name=service_name, used_local_processing=True)
+    attach_author_meta(embed, service_name=service_name, canonical_top_level_command=canonical_top_level_command)
+    attach_embed_images_meta(embed, service_name=service_name)
     return embed
 
 
@@ -679,6 +681,8 @@ def build_channel_aura_embed(
     title: str = "RESOCONTO CANALE · AURA",
     footer_text: str = "Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
     max_chars: int = AURA_DETAILS_INTERNAL_BUDGET,
+    service_name: str = "aura",
+    canonical_top_level_command: str | None = "dmserversummary",
 ) -> discord.Embed:
     stages = [
         ((6, 2), False, 3, False, False),
@@ -699,6 +703,8 @@ def build_channel_aura_embed(
             compact_missions=compact_missions,
             compact_advice=compact_advice,
             footer_text=footer_text,
+            service_name=service_name,
+            canonical_top_level_command=canonical_top_level_command,
         )
         size = _estimate_embed_size(candidate)
         if idx == 0:

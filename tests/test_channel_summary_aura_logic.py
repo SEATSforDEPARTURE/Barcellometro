@@ -3,8 +3,12 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
+
 from app.services import channel_summary_service as channel_summary_module
 from app.services.channel_summary_service import ChannelSummaryService
+from app.services.author import attach_author_meta
+from app.shared.discord.author_pipeline import finalize_embeds_author
 
 
 class _FakeAuraDb:
@@ -94,10 +98,31 @@ def test_generate_channel_aura_embed_matches_shared_full_report_builder() -> Non
         assert standalone_embed is not None
         assert full_report_third_embed is not None
         assert standalone_embed.title == full_report_third_embed.title
-        assert standalone_embed.description == full_report_third_embed.description
         assert [field.name for field in standalone_embed.fields] == [field.name for field in full_report_third_embed.fields]
         assert [field.value for field in standalone_embed.fields] == [field.value for field in full_report_third_embed.fields]
         assert standalone_embed.footer.text == full_report_third_embed.footer.text
+
+    asyncio.run(_run())
+
+
+def test_generate_channel_aura_embed_uses_channel_summary_author_without_pagination() -> None:
+    async def _run() -> None:
+        service = _service()
+        embed = await service.generate_channel_aura_embed(
+            guild_id="1",
+            channel_id="2",
+            start_local=datetime(2026, 4, 16, 0, 0),
+            end_local=datetime(2026, 4, 16, 23, 59),
+            period_label="oggi",
+        )
+        assert embed is not None
+        await finalize_embeds_author([embed], None, default_service_name="channel_summary")
+
+        assert embed.author.name == "servizio CHANNEL SUMMARY"
+        assert "Pag." not in (embed.author.name or "")
+        assert "DM SERVER SUMMARY" not in (embed.author.name or "")
+        assert embed.description is not None and embed.description.startswith("*Oggi. ")
+        assert "PUNTI AURA" in (embed.description or "")
 
     asyncio.run(_run())
 
@@ -188,5 +213,46 @@ def test_generate_and_send_for_channel_aura_only_skips_summary_pipeline() -> Non
         channel.send.assert_awaited_once()
         payload = channel.send.await_args.kwargs["embeds"]
         assert len(payload) == 1
+
+    asyncio.run(_run())
+
+
+def test_generate_and_send_for_channel_aura_only_uses_channel_summary_author_without_pagination() -> None:
+    async def _run() -> None:
+        class _FakeChannel(channel_summary_module.discord.abc.Messageable):
+            async def _get_channel(self):
+                return self
+
+            async def send(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                return None
+
+        channel = _FakeChannel()
+        channel.send = AsyncMock()
+        bot = SimpleNamespace(get_channel=lambda _cid: channel)
+        database = SimpleNamespace(mark_daily_report_sent=AsyncMock())
+        summary_service = SimpleNamespace(build_summary=AsyncMock(), get_config=AsyncMock(return_value={}))
+        service = ChannelSummaryService(
+            database=database,
+            bot=bot,
+            summary_service=summary_service,
+            barcello_service=SimpleNamespace(),
+        )
+        aura_embed = discord.Embed(title="📓 __**RESOCONTO CANALE · AURA**__", description="*Test aura.*")
+        attach_author_meta(aura_embed, service_name="aura", canonical_top_level_command="dmserversummary")
+        service.build_channel_summary_aura_embed = AsyncMock(return_value=aura_embed)
+
+        sent = await service.generate_and_send_for_channel(
+            guild_id="1",
+            channel_id="2",
+            embed_section="aura",
+            manual=False,
+        )
+
+        assert sent is True
+        payload = channel.send.await_args.kwargs["embeds"]
+        assert len(payload) == 1
+        assert payload[0].author.name == "servizio CHANNEL SUMMARY"
+        assert "Pag." not in (payload[0].author.name or "")
+        assert "DM SERVER SUMMARY" not in (payload[0].author.name or "")
 
     asyncio.run(_run())

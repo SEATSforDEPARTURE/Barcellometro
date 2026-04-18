@@ -134,6 +134,9 @@ async def _run_channel_aura_window(
         channel_id=str(interaction.channel_id),
         start_local=window.start_dt,
         end_local=window.end_dt,
+        period_label=window.period_label,
+        requested_quantity=window.requested_quantity,
+        requested_unit=window.requested_unit,
     )
     if embed is None:
         await send_resoconto_response(

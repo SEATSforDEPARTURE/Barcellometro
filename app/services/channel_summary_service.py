@@ -14,7 +14,7 @@ import discord
 from app.services.footer import attach_footer_meta
 
 from app.plugins.commands_modular.time_windows import TimeWindowResult, infer_rolling_window_request, resolve_ieri_window, resolve_oggi_window
-from app.renderers.channel_summary import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, format_window_header
+from app.renderers.channel_summary import MessageMeta, QuoteRenderItem, build_channel_summary_embeds, build_channel_summary_insufficient_data_embed, build_channel_summary_period_prefix, format_window_header
 from app.services.barcello_service import BarcelloResult, BarcelloService
 from app.services.aura import aura_reason_to_human
 from app.renderers.aura_renderer import ChannelAuraEmbedData, ChannelAuraMissionTrend, ChannelAuraTopUserItem, build_channel_aura_advice, build_channel_aura_embed
@@ -23,6 +23,7 @@ from app.services.content_summary_service import SummaryResult, SummaryService
 from app.shared.discord.embed_limits import _estimate_embed_size, estimate_embeds_total_size
 from app.services.message_name_service import resolve_display_name_from_message_id, resolve_primary_message_id, safe_display_name
 from app.shared.discord.author_pipeline import finalize_embeds_author
+from app.services.author import attach_author_meta
 
 logger = logging.getLogger(__name__)
 ROME_TZ = ZoneInfo("Europe/Rome")
@@ -423,16 +424,25 @@ class ChannelSummaryService:
         end_dt = end_local.astimezone(timezone.utc)
         logger.debug("channel_summary period guild=%s channel=%s start_utc=%s end_utc=%s", guild_id, channel_id, start_dt.isoformat(), end_dt.isoformat())
         if normalized_embed_section == "aura":
+            window_header = format_window_header(
+                period_label=window.period_label,
+                start_dt=start_local,
+                end_dt=end_local,
+                requested_quantity=window.requested_quantity,
+                requested_unit=window.requested_unit,
+            )
             aura_embed = await self.build_channel_summary_aura_embed(
                 guild_id=guild_id,
                 channel_id=channel_id,
                 start_local=start_local,
                 end_local=end_local,
+                window_header=window_header,
             )
             if aura_embed is None:
                 logger.info("channel_summary aura_only_skipped_no_data guild=%s channel=%s", guild_id, channel_id)
                 return False
             attach_footer_meta(aura_embed, service_name="channel_summary", used_local_processing=True)
+            attach_author_meta(aura_embed, service_name="channel_summary", canonical_top_level_command="channelsummary")
             await finalize_embeds_author([aura_embed], None, default_service_name="channel_summary")
             try:
                 await channel.send(embeds=[aura_embed])
@@ -736,6 +746,7 @@ class ChannelSummaryService:
             channel_id=channel_id,
             start_local=start_local,
             end_local=end_local,
+            window_header=window_header,
         )
 
         embeds = build_channel_summary_embeds(
@@ -782,12 +793,18 @@ class ChannelSummaryService:
             if aura_chars_final > 5800:
                 logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
                 embeds = embeds[:2]
-        await finalize_embeds_author(embeds, None, default_service_name="channel_summary")
         selected_embeds = embeds
         if normalized_embed_section == "panoramica":
             selected_embeds = embeds[:1]
         elif normalized_embed_section == "riassunto":
             selected_embeds = embeds[1:2]
+            if selected_embeds:
+                period_prefix = build_channel_summary_period_prefix(window_header)
+                selected_embeds[0].description = f"*{period_prefix} Andiamo a leggere cosa è successo...*"
+        if normalized_embed_section in {"panoramica", "riassunto"}:
+            await finalize_embeds_author(selected_embeds, None, default_service_name="channel_summary")
+        else:
+            await finalize_embeds_author(embeds, None, default_service_name="channel_summary")
         try:
             if len(selected_embeds) >= 3:
                 first_batch = selected_embeds[:2]
@@ -873,12 +890,28 @@ class ChannelSummaryService:
         channel_id: str,
         start_local: datetime,
         end_local: datetime,
+        period_label: str | None = None,
+        requested_quantity: int | None = None,
+        requested_unit: str | None = None,
     ) -> discord.Embed | None:
+        resolved_period_label = str(period_label or "").strip().lower() or "ultimi"
+        qty = requested_quantity
+        unit = requested_unit
+        if resolved_period_label == "ultimi" and (qty is None or not str(unit or "").strip()):
+            qty, unit = infer_rolling_window_request(start_local, end_local)
+        window_header = format_window_header(
+            period_label=resolved_period_label,
+            start_dt=start_local,
+            end_dt=end_local,
+            requested_quantity=qty,
+            requested_unit=unit,
+        )
         return await self.build_channel_summary_aura_embed(
             guild_id=guild_id,
             channel_id=channel_id,
             start_local=start_local,
             end_local=end_local,
+            window_header=window_header,
         )
 
     async def build_channel_summary_aura_embed(
@@ -888,6 +921,7 @@ class ChannelSummaryService:
         channel_id: str,
         start_local: datetime,
         end_local: datetime,
+        window_header: str | None = None,
     ) -> discord.Embed | None:
         start_ts = start_local.astimezone(timezone.utc).isoformat()
         end_ts = end_local.astimezone(timezone.utc).isoformat()
@@ -967,6 +1001,8 @@ class ChannelSummaryService:
         aura_embed = build_channel_aura_embed(
             title="RESOCONTO CANALE · AURA",
             footer_text="Il sistema PUNTI AURA è in fase di sviluppo. I dati potrebbero non essere accurati.",
+            service_name="channel_summary",
+            canonical_top_level_command="channelsummary",
             data=ChannelAuraEmbedData(
                 positive_points=total_positive,
                 negative_points=total_negative,
@@ -995,6 +1031,9 @@ class ChannelSummaryService:
                 previous_average_karma_participants=int(previous_avg_karma.get("participants_count") or 0),
             )
         )
+        if window_header:
+            period_prefix = build_channel_summary_period_prefix(window_header)
+            aura_embed.description = f"*{period_prefix} {str(aura_embed.description or '').strip('* ')}*"
         logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)
         return aura_embed
 
