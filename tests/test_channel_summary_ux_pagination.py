@@ -88,15 +88,16 @@ def test_channel_summary_standalone_riassunto_has_period_prefix_and_no_paginatio
     async def _run() -> None:
         embeds = _build_fixture_embeds()
         summary_embed = embeds[1]
-        period_prefix = build_channel_summary_period_prefix("**🗓️ Oggi. Venerdì, 3 Aprile 2026**")
-        summary_embed.description = f"*{period_prefix} Andiamo a leggere cosa è successo...*"
+        period_prefix = build_channel_summary_period_prefix("**🗓️ Oggi. Venerdì, 3 Aprile 2026**", trailing_period=False)
+        summary_embed.description = f"**{period_prefix}** è successo..."
 
         await finalize_embeds_author([summary_embed], None, default_service_name="channel_summary")
 
         assert summary_embed.author.name == "servizio CHANNEL SUMMARY"
         assert "Pag." not in (summary_embed.author.name or "")
-        assert (summary_embed.description or "").startswith("*Oggi.")
-        assert "Andiamo a leggere cosa è successo..." in (summary_embed.description or "")
+        assert (summary_embed.description or "").startswith("**Oggi.")
+        assert "è successo..." in (summary_embed.description or "")
+        assert "Andiamo a leggere cosa è successo" not in (summary_embed.description or "")
 
     asyncio.run(_run())
 
