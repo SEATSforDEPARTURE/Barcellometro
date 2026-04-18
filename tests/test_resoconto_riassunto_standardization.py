@@ -149,30 +149,45 @@ def test_send_standard_response_with_disabled_footer_service_suppresses_footer()
 
     asyncio.run(_run())
 
-def test_resoconto_manual_paths_are_restored_at_top_level_and_kept_under_aura() -> None:
+def test_resoconto_manual_paths_are_locale_specific_for_canonical_and_alias_roots() -> None:
     ctx = SimpleNamespace(timezone=ZoneInfo("Europe/Rome"), config=SimpleNamespace(), footer=None)
     channel_group = discord.app_commands.Group(name="channelsummary", description="x")
     server_group = discord.app_commands.Group(name="serversummary", description="x")
+    alias_channel_group = discord.app_commands.Group(name="resocontocanale", description="x")
+    alias_server_group = discord.app_commands.Group(name="resocontoserver", description="x")
 
     register_resoconto(channel_group, server_group, ctx)
+    register_resoconto(
+        alias_channel_group,
+        alias_server_group,
+        ctx,
+        channel_root="resocontocanale",
+        server_root="resocontoserver",
+    )
 
     channel_names = {cmd.name for cmd in channel_group.commands}
-    server_names = {cmd.name for cmd in server_group.commands}
-    assert {"oggi", "ieri", "ultimi", "range"}.issubset(channel_names)
-    assert {"oggi", "ieri", "ultimi", "range"}.issubset(server_names)
+    assert {"today", "yesterday", "last", "range"}.issubset(channel_names)
+    assert {"oggi", "ieri", "ultimi", "intervallo"}.isdisjoint(channel_names)
 
     channel_aura = _get_subgroup(channel_group, "aura")
-    server_aura = _get_subgroup(server_group, "aura")
-    assert {"oggi", "ieri", "ultimi", "range"}.issubset({cmd.name for cmd in channel_aura.commands})
-    assert {"oggi", "ieri", "ultimi", "range"}.issubset({cmd.name for cmd in server_aura.commands})
+    assert {"today", "yesterday", "last", "range"}.issubset({cmd.name for cmd in channel_aura.commands})
+    assert {"oggi", "ieri", "ultimi", "intervallo", "range"}.isdisjoint({cmd.name for cmd in channel_aura.commands})
+
+    alias_channel_names = {cmd.name for cmd in alias_channel_group.commands}
+    assert {"oggi", "ieri", "ultimi", "intervallo"}.issubset(alias_channel_names)
+    assert {"today", "yesterday", "last", "range"}.isdisjoint(alias_channel_names)
+
+    alias_channel_aura = _get_subgroup(alias_channel_group, "aura")
+    assert {"oggi", "ieri", "ultimi", "intervallo"}.issubset({cmd.name for cmd in alias_channel_aura.commands})
+    assert {"today", "yesterday", "last", "range"}.isdisjoint({cmd.name for cmd in alias_channel_aura.commands})
 
 
 @pytest.mark.parametrize(
     ("command_name", "args"),
     [
-        ("oggi", ()),
-        ("ieri", ()),
-        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("today", ()),
+        ("yesterday", ()),
+        ("last", (3, discord.app_commands.Choice(name="hours", value="ore"))),
         ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
     ],
 )
@@ -213,9 +228,9 @@ def test_resocontocanale_top_level_callbacks_route_to_full_summary_helper(comman
 @pytest.mark.parametrize(
     ("command_name", "args"),
     [
-        ("oggi", ()),
-        ("ieri", ()),
-        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("today", ()),
+        ("yesterday", ()),
+        ("last", (3, discord.app_commands.Choice(name="hours", value="ore"))),
         ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
     ],
 )
@@ -257,9 +272,9 @@ def test_resocontocanale_aura_subcommands_route_to_aura_helper(command_name: str
 @pytest.mark.parametrize(
     ("command_name", "args"),
     [
-        ("oggi", ()),
-        ("ieri", ()),
-        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("today", ()),
+        ("yesterday", ()),
+        ("last", (3, discord.app_commands.Choice(name="hours", value="ore"))),
         ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
     ],
 )
@@ -300,9 +315,9 @@ def test_resocontoserver_top_level_callbacks_route_to_full_summary_helper(comman
 @pytest.mark.parametrize(
     ("command_name", "args"),
     [
-        ("oggi", ()),
-        ("ieri", ()),
-        ("ultimi", (3, discord.app_commands.Choice(name="ore", value="ore"))),
+        ("today", ()),
+        ("yesterday", ()),
+        ("last", (3, discord.app_commands.Choice(name="hours", value="ore"))),
         ("range", ("01/03/2026 00:00", "02/03/2026 00:00")),
     ],
 )
@@ -373,6 +388,57 @@ def test_resoconto_status_uses_standard_embed() -> None:
         assert kwargs["embed"].title
         _assert_standard_footer(kwargs["embed"].footer.text)
         assert not interaction.response.send_message.await_args.args
+
+    asyncio.run(_run())
+
+
+def test_channel_schedule_show_and_list_include_embed_section() -> None:
+    async def _run() -> None:
+        row = {
+            "id": 11,
+            "type": "oggi",
+            "embed_section": "aura",
+            "start_ts": "2026-03-01T00:00:00+00:00",
+            "end_ts": "2026-03-01T23:59:59+00:00",
+            "publish_at": "2026-03-02T10:00:00+00:00",
+            "repeat_every_value": None,
+            "repeat_every_unit": None,
+            "status": "active",
+            "last_run_at": None,
+            "next_run_at": "2026-03-02T10:00:00+00:00",
+        }
+        db = SimpleNamespace(
+            get_channel_summary_schedule=AsyncMock(return_value=row),
+            list_channel_summary_schedules=AsyncMock(return_value=[row]),
+        )
+        ctx = SimpleNamespace(
+            database=db,
+            timezone=ZoneInfo("Europe/Rome"),
+            config=SimpleNamespace(),
+            footer=None,
+            channel_summary=object(),
+            daily_activity_report=object(),
+            entitlements=SimpleNamespace(),
+        )
+        group = discord.app_commands.Group(name="channelsummary", description="x")
+        server_group = discord.app_commands.Group(name="serversummary", description="x")
+        old_permission = resoconto_module.check_permission
+        resoconto_module.check_permission = AsyncMock(return_value=True)
+        try:
+            register_resoconto(group, server_group, ctx)
+            show_callback = _get_command_callback(group, "schedule_show")
+            list_callback = _get_command_callback(group, "schedule_list")
+            show_interaction = _FakeInteraction(qualified_name="channelsummary schedule_show")
+            list_interaction = _FakeInteraction(qualified_name="channelsummary schedule_list")
+            await show_callback(show_interaction, schedule_id=11)
+            await list_callback(list_interaction)
+        finally:
+            resoconto_module.check_permission = old_permission
+
+        show_embed = show_interaction.response.send_message.await_args.kwargs["embed"]
+        list_embed = list_interaction.response.send_message.await_args.kwargs["embed"]
+        assert "embed_section=aura" in (show_embed.fields[0].value or "")
+        assert "embed_section=aura" in (list_embed.fields[0].value or "")
 
     asyncio.run(_run())
 

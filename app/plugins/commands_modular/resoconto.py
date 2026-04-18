@@ -38,6 +38,29 @@ LAST_UNIT_TO_INTERNAL = {
     "days": "giorni",
     "weeks": "settimane",
 }
+SUPPORTED_EMBED_SECTIONS = {"panoramica", "riassunto", "aura"}
+LOCALE_COMMANDS = {
+    "en": {
+        "today": "today",
+        "yesterday": "yesterday",
+        "last": "last",
+        "range": "range",
+        "quantity": "quantity",
+        "unit": "unit",
+        "from": "from",
+        "to": "to",
+    },
+    "it": {
+        "today": "oggi",
+        "yesterday": "ieri",
+        "last": "ultimi",
+        "range": "intervallo",
+        "quantity": "quantita",
+        "unit": "unita",
+        "from": "da",
+        "to": "a",
+    },
+}
 
 
 async def _run_channel_summary_window(
@@ -263,6 +286,25 @@ def register_resoconto(
     channel_root: str = "channelsummary",
     server_root: str = "serversummary",
 ) -> None:
+    channel_locale = "en" if channel_root == "channelsummary" else "it"
+    server_locale = "en" if server_root == "serversummary" else "it"
+    channel_cmd = LOCALE_COMMANDS[channel_locale]
+    server_cmd = LOCALE_COMMANDS[server_locale]
+    manual_unit_choices = {
+        "en": [
+            app_commands.Choice(name="minutes", value="minuti"),
+            app_commands.Choice(name="hours", value="ore"),
+            app_commands.Choice(name="days", value="giorni"),
+            app_commands.Choice(name="weeks", value="settimane"),
+        ],
+        "it": [
+            app_commands.Choice(name="minuti", value="minuti"),
+            app_commands.Choice(name="ore", value="ore"),
+            app_commands.Choice(name="giorni", value="giorni"),
+            app_commands.Choice(name="settimane", value="settimane"),
+        ],
+    }
+
     def _normalize_message(message: str) -> str:
         return str(message or "").lstrip("✅⚠️❌ℹ️ ").strip() or "Nessun dettaglio disponibile."
 
@@ -338,6 +380,14 @@ def register_resoconto(
             return None, None
         return int(match.group(1)), match.group(2)
 
+    def _normalize_embed_section(raw: str | None) -> str | None:
+        value = str(raw or "").strip().lower()
+        if not value:
+            return None
+        if value in {"full", "legacy", "all"}:
+            return None
+        return value if value in SUPPORTED_EMBED_SECTIONS else None
+
     def _fmt_schedule_ts(ts: str | None) -> str:
         if not ts:
             return "—"
@@ -392,7 +442,7 @@ def register_resoconto(
         return (
             f"id={row['id']} | status={str(row.get('status') or 'active')} | window={_format_window_details(row, key)} | "
             f"publish_at={_fmt_schedule_ts(str(row.get('publish_at') or ''))} | next_run_at={_fmt_schedule_ts(str(row.get('next_run_at') or ''))} | "
-            f"every={recurrence}"
+            f"every={recurrence} | embed_section={str(row.get('embed_section') or 'full')}"
         )
 
     def _schedule_section(rows: list[dict[str, object]], *, key: str, empty_message: str) -> list[CommandEmbedSection]:
@@ -470,6 +520,7 @@ def register_resoconto(
         *,
         schedule_kind: str,
         publish_at: str,
+        embed_section: str | None,
         every: str | None,
         quantity: int | None,
         unit: str | None,
@@ -505,6 +556,10 @@ def register_resoconto(
         if publish_at_dt is None:
             await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Invalid `publish_at` format. Use DD/MM/YYYY HH:MM.")
             return
+        normalized_embed_section = _normalize_embed_section(embed_section)
+        if embed_section is not None and normalized_embed_section is None:
+            await _send_message(interaction, scope="canale", path="schedule_add", message="❌ Invalid `embed_section`. Use panoramica, riassunto, or aura.")
+            return
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
         guild_id = str(interaction.guild_id)
@@ -514,6 +569,7 @@ def register_resoconto(
             guild_id=guild_id,
             channel_id=channel_id,
             schedule_type=str(internal_kind),
+            embed_section=normalized_embed_section,
             start_ts=window.start_dt.astimezone(timezone.utc).isoformat(),
             end_ts=window.end_dt.astimezone(timezone.utc).isoformat(),
             publish_at=publish_at_dt.astimezone(timezone.utc).isoformat(),
@@ -527,7 +583,12 @@ def register_resoconto(
             scope="canale",
             path="schedule_add",
             kind="success",
-            lines=[("schedule_id", schedule_id), ("publish_at", publish_at), ("recurrence", suffix.strip() or "one-shot")],
+            lines=[
+                ("schedule_id", schedule_id),
+                ("publish_at", publish_at),
+                ("recurrence", suffix.strip() or "one-shot"),
+                ("embed_section", normalized_embed_section or "full"),
+            ],
         )
 
     @resocontocanale_group.command(name="on", description="Enable automatic channel summaries for the current channel.")
@@ -585,6 +646,7 @@ def register_resoconto(
     @resocontocanale_group.command(name="schedule_add", description="Add a channel summary schedule.")
     @app_commands.describe(
         schedule_kind="Schedule window type: today, yesterday, last, or range.",
+        embed_section="Optional single embed section: panoramica, riassunto, aura.",
         publish_at="First publish date and time in DD/MM/YYYY HH:MM.",
         every="Optional repeat interval like 1440min, 24hours, or 1days.",
         quantity="Required when schedule_kind is `last`.",
@@ -605,11 +667,18 @@ def register_resoconto(
             app_commands.Choice(name="days", value="days"),
             app_commands.Choice(name="weeks", value="weeks"),
         ],
+        embed_section=[
+            app_commands.Choice(name="full", value="full"),
+            app_commands.Choice(name="panoramica", value="panoramica"),
+            app_commands.Choice(name="riassunto", value="riassunto"),
+            app_commands.Choice(name="aura", value="aura"),
+        ],
     )
     async def canale_schedule_add(
         interaction: discord.Interaction,
         schedule_kind: app_commands.Choice[str],
         publish_at: str,
+        embed_section: app_commands.Choice[str] | None = None,
         every: str | None = None,
         quantity: int | None = None,
         unit: app_commands.Choice[str] | None = None,
@@ -619,6 +688,7 @@ def register_resoconto(
         await _create_channel_schedule(
             interaction,
             schedule_kind=schedule_kind.value,
+            embed_section=embed_section.value if embed_section else None,
             publish_at=publish_at,
             every=every,
             quantity=quantity,
@@ -630,13 +700,23 @@ def register_resoconto(
     @resocontocanale_group.command(name="schedule_edit", description="Edit a channel summary schedule.")
     @app_commands.describe(
         schedule_id="Schedule ID to update.",
+        embed_section="Optional single embed section: panoramica, riassunto, aura. Empty keeps full summary.",
         publish_at="Optional new publish date and time in DD/MM/YYYY HH:MM.",
         every="Optional repeat interval like 1440min, 24hours, 1days, off, or none.",
         enabled="Optional enabled state for the schedule.",
     )
+    @app_commands.choices(
+        embed_section=[
+            app_commands.Choice(name="full", value="full"),
+            app_commands.Choice(name="panoramica", value="panoramica"),
+            app_commands.Choice(name="riassunto", value="riassunto"),
+            app_commands.Choice(name="aura", value="aura"),
+        ]
+    )
     async def canale_schedule_edit(
         interaction: discord.Interaction,
         schedule_id: int,
+        embed_section: app_commands.Choice[str] | None = None,
         publish_at: str | None = None,
         every: str | None = None,
         enabled: bool | None = None,
@@ -665,12 +745,16 @@ def register_resoconto(
         if every is None:
             every_value = int(row["repeat_every_value"]) if row["repeat_every_value"] is not None else None
             every_unit = str(row["repeat_every_unit"] or "") or None
+        normalized_embed_section = _normalize_embed_section(embed_section.value if embed_section else None)
+        if embed_section is None:
+            normalized_embed_section = str(row["embed_section"] or "").strip().lower() or None
         status_value = "active" if enabled else "disabled" if enabled is not None else None
         ok = await ctx.database.update_channel_summary_schedule(
             schedule_id=schedule_id,
             guild_id=str(interaction.guild_id),
             channel_id=str(interaction.channel_id),
             publish_at=publish_dt.astimezone(timezone.utc).isoformat() if publish_dt else None,
+            embed_section=normalized_embed_section,
             repeat_every_value=every_value,
             repeat_every_unit=every_unit,
             status=status_value,
@@ -683,7 +767,12 @@ def register_resoconto(
             scope="canale",
             path="schedule_edit",
             kind="success",
-            lines=[("schedule_id", schedule_id), ("result", "updated"), ("enabled", status_value or str(row.get("status") or "active"))],
+            lines=[
+                ("schedule_id", schedule_id),
+                ("result", "updated"),
+                ("enabled", status_value or str(row.get("status") or "active")),
+                ("embed_section", normalized_embed_section or "full"),
+            ],
         )
 
     @resocontocanale_group.command(name="schedule_remove", description="Remove a channel summary schedule.")
@@ -756,130 +845,124 @@ def register_resoconto(
     canale_aura_group = app_commands.Group(name="aura", description="Aura details")
     resocontocanale_group.add_command(canale_aura_group)
 
-    @resocontocanale_group.command(name="oggi", description="Show manual channel summary for today.")
+    @resocontocanale_group.command(name=channel_cmd["today"], description="Show manual channel summary for today.")
     async def canale_oggi(interaction: discord.Interaction) -> None:
         await _run_channel_summary_window(
             interaction,
             ctx=ctx,
             window=resolve_oggi_window(),
-            path="oggi",
+            path=channel_cmd["today"],
             subtitle_args=None,
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @canale_aura_group.command(name="oggi", description="Show manual channel aura details for today.")
+    @canale_aura_group.command(name=channel_cmd["today"], description="Show manual channel aura details for today.")
     async def canale_aura_oggi(interaction: discord.Interaction) -> None:
         await _run_channel_aura_window(
             interaction,
             ctx=ctx,
             window=resolve_oggi_window(),
-            path="aura oggi",
+            path=f"aura {channel_cmd['today']}",
             subtitle_args=None,
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @resocontocanale_group.command(name="ieri", description="Show manual channel summary for yesterday.")
+    @resocontocanale_group.command(name=channel_cmd["yesterday"], description="Show manual channel summary for yesterday.")
     async def canale_ieri(interaction: discord.Interaction) -> None:
         await _run_channel_summary_window(
             interaction,
             ctx=ctx,
             window=resolve_ieri_window(),
-            path="ieri",
+            path=channel_cmd["yesterday"],
             subtitle_args=None,
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @canale_aura_group.command(name="ieri", description="Show manual channel aura details for yesterday.")
+    @canale_aura_group.command(name=channel_cmd["yesterday"], description="Show manual channel aura details for yesterday.")
     async def canale_aura_ieri(interaction: discord.Interaction) -> None:
         await _run_channel_aura_window(
             interaction,
             ctx=ctx,
             window=resolve_ieri_window(),
-            path="aura ieri",
+            path=f"aura {channel_cmd['yesterday']}",
             subtitle_args=None,
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @resocontocanale_group.command(name="ultimi", description="Show manual channel summary for the last window.")
+    @resocontocanale_group.command(name=channel_cmd["last"], description="Show manual channel summary for the last window.")
+    @app_commands.rename(quantity=channel_cmd["quantity"], unit=channel_cmd["unit"])
     @app_commands.choices(
-        unita=[
-            app_commands.Choice(name="minuti", value="minuti"),
-            app_commands.Choice(name="ore", value="ore"),
-            app_commands.Choice(name="giorni", value="giorni"),
-            app_commands.Choice(name="settimane", value="settimane"),
-        ]
+        unit=manual_unit_choices[channel_locale]
     )
-    async def canale_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+    async def canale_ultimi(interaction: discord.Interaction, quantity: int, unit: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantity, unit.value, ctx.config)
         if error:
-            await _send_message(interaction, scope="canale", path="ultimi", subtitle_args=[quantita, unita], message=error)
+            await _send_message(interaction, scope="canale", path=channel_cmd["last"], subtitle_args=[quantity, unit], message=error)
             return
         await _run_channel_summary_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="ultimi",
-            subtitle_args=[quantita, unita],
+            path=channel_cmd["last"],
+            subtitle_args=[quantity, unit],
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @canale_aura_group.command(name="ultimi", description="Show manual channel aura details for the last window.")
+    @canale_aura_group.command(name=channel_cmd["last"], description="Show manual channel aura details for the last window.")
+    @app_commands.rename(quantity=channel_cmd["quantity"], unit=channel_cmd["unit"])
     @app_commands.choices(
-        unita=[
-            app_commands.Choice(name="minuti", value="minuti"),
-            app_commands.Choice(name="ore", value="ore"),
-            app_commands.Choice(name="giorni", value="giorni"),
-            app_commands.Choice(name="settimane", value="settimane"),
-        ]
+        unit=manual_unit_choices[channel_locale]
     )
-    async def canale_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+    async def canale_aura_ultimi(interaction: discord.Interaction, quantity: int, unit: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantity, unit.value, ctx.config)
         if error:
-            await _send_message(interaction, scope="canale", path="aura ultimi", subtitle_args=[quantita, unita], message=error)
+            await _send_message(interaction, scope="canale", path=f"aura {channel_cmd['last']}", subtitle_args=[quantity, unit], message=error)
             return
         await _run_channel_aura_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="aura ultimi",
-            subtitle_args=[quantita, unita],
+            path=f"aura {channel_cmd['last']}",
+            subtitle_args=[quantity, unit],
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @resocontocanale_group.command(name="range", description="Show manual channel summary for a range.")
-    async def canale_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        window, error = resolve_range_window(da, a, ctx.config)
+    @resocontocanale_group.command(name=channel_cmd["range"], description="Show manual channel summary for a range.")
+    @app_commands.rename(from_=channel_cmd["from"], to=channel_cmd["to"])
+    async def canale_range(interaction: discord.Interaction, from_: str, to: str) -> None:
+        window, error = resolve_range_window(from_, to, ctx.config)
         if error:
-            await _send_message(interaction, scope="canale", path="range", subtitle_args=[da, a], message=error)
+            await _send_message(interaction, scope="canale", path=channel_cmd["range"], subtitle_args=[from_, to], message=error)
             return
         await _run_channel_summary_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="range",
-            subtitle_args=[da, a],
+            path=channel_cmd["range"],
+            subtitle_args=[from_, to],
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @canale_aura_group.command(name="range", description="Show manual channel aura details for a range.")
-    async def canale_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        window, error = resolve_range_window(da, a, ctx.config)
+    @canale_aura_group.command(name=channel_cmd["range"], description="Show manual channel aura details for a range.")
+    @app_commands.rename(from_=channel_cmd["from"], to=channel_cmd["to"])
+    async def canale_aura_range(interaction: discord.Interaction, from_: str, to: str) -> None:
+        window, error = resolve_range_window(from_, to, ctx.config)
         if error:
-            await _send_message(interaction, scope="canale", path="aura range", subtitle_args=[da, a], message=error)
+            await _send_message(interaction, scope="canale", path=f"aura {channel_cmd['range']}", subtitle_args=[from_, to], message=error)
             return
         await _run_channel_aura_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="aura range",
-            subtitle_args=[da, a],
+            path=f"aura {channel_cmd['range']}",
+            subtitle_args=[from_, to],
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
@@ -1098,126 +1181,120 @@ def register_resoconto(
     server_aura_group = app_commands.Group(name="aura", description="Aura details")
     resocontoserver_group.add_command(server_aura_group)
 
-    @resocontoserver_group.command(name="oggi", description="Show manual server summary for today.")
+    @resocontoserver_group.command(name=server_cmd["today"], description="Show manual server summary for today.")
     async def server_oggi(interaction: discord.Interaction) -> None:
         await _run_server_summary_window(
             interaction,
             ctx=ctx,
             window=resolve_oggi_window(),
-            path="oggi",
+            path=server_cmd["today"],
             subtitle_args=None,
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @server_aura_group.command(name="oggi", description="Show manual server aura details for today.")
+    @server_aura_group.command(name=server_cmd["today"], description="Show manual server aura details for today.")
     async def server_aura_oggi(interaction: discord.Interaction) -> None:
         await _run_server_aura_window(
             interaction,
             ctx=ctx,
             window=resolve_oggi_window(),
-            path="aura oggi",
+            path=f"aura {server_cmd['today']}",
             subtitle_args=None,
             send_message=_send_message,
         )
 
-    @resocontoserver_group.command(name="ieri", description="Show manual server summary for yesterday.")
+    @resocontoserver_group.command(name=server_cmd["yesterday"], description="Show manual server summary for yesterday.")
     async def server_ieri(interaction: discord.Interaction) -> None:
         await _run_server_summary_window(
             interaction,
             ctx=ctx,
             window=resolve_ieri_window(),
-            path="ieri",
+            path=server_cmd["yesterday"],
             subtitle_args=None,
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @server_aura_group.command(name="ieri", description="Show manual server aura details for yesterday.")
+    @server_aura_group.command(name=server_cmd["yesterday"], description="Show manual server aura details for yesterday.")
     async def server_aura_ieri(interaction: discord.Interaction) -> None:
         await _run_server_aura_window(
             interaction,
             ctx=ctx,
             window=resolve_ieri_window(),
-            path="aura ieri",
+            path=f"aura {server_cmd['yesterday']}",
             subtitle_args=None,
             send_message=_send_message,
         )
 
-    @resocontoserver_group.command(name="ultimi", description="Show manual server summary for the last window.")
+    @resocontoserver_group.command(name=server_cmd["last"], description="Show manual server summary for the last window.")
+    @app_commands.rename(quantity=server_cmd["quantity"], unit=server_cmd["unit"])
     @app_commands.choices(
-        unita=[
-            app_commands.Choice(name="minuti", value="minuti"),
-            app_commands.Choice(name="ore", value="ore"),
-            app_commands.Choice(name="giorni", value="giorni"),
-            app_commands.Choice(name="settimane", value="settimane"),
-        ]
+        unit=manual_unit_choices[server_locale]
     )
-    async def server_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+    async def server_ultimi(interaction: discord.Interaction, quantity: int, unit: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantity, unit.value, ctx.config)
         if error:
-            await _send_message(interaction, scope="server", path="ultimi", subtitle_args=[quantita, unita], message=error)
+            await _send_message(interaction, scope="server", path=server_cmd["last"], subtitle_args=[quantity, unit], message=error)
             return
         await _run_server_summary_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="ultimi",
-            subtitle_args=[quantita, unita],
+            path=server_cmd["last"],
+            subtitle_args=[quantity, unit],
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @server_aura_group.command(name="ultimi", description="Show manual server aura details for the last window.")
+    @server_aura_group.command(name=server_cmd["last"], description="Show manual server aura details for the last window.")
+    @app_commands.rename(quantity=server_cmd["quantity"], unit=server_cmd["unit"])
     @app_commands.choices(
-        unita=[
-            app_commands.Choice(name="minuti", value="minuti"),
-            app_commands.Choice(name="ore", value="ore"),
-            app_commands.Choice(name="giorni", value="giorni"),
-            app_commands.Choice(name="settimane", value="settimane"),
-        ]
+        unit=manual_unit_choices[server_locale]
     )
-    async def server_aura_ultimi(interaction: discord.Interaction, quantita: int, unita: app_commands.Choice[str]) -> None:
-        window, error = resolve_ultimi_window(quantita, unita.value, ctx.config)
+    async def server_aura_ultimi(interaction: discord.Interaction, quantity: int, unit: app_commands.Choice[str]) -> None:
+        window, error = resolve_ultimi_window(quantity, unit.value, ctx.config)
         if error:
-            await _send_message(interaction, scope="server", path="aura ultimi", subtitle_args=[quantita, unita], message=error)
+            await _send_message(interaction, scope="server", path=f"aura {server_cmd['last']}", subtitle_args=[quantity, unit], message=error)
             return
         await _run_server_aura_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="aura ultimi",
-            subtitle_args=[quantita, unita],
+            path=f"aura {server_cmd['last']}",
+            subtitle_args=[quantity, unit],
             send_message=_send_message,
         )
 
-    @resocontoserver_group.command(name="range", description="Show manual server summary for a range.")
-    async def server_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        window, error = resolve_range_window(da, a, ctx.config)
+    @resocontoserver_group.command(name=server_cmd["range"], description="Show manual server summary for a range.")
+    @app_commands.rename(from_=server_cmd["from"], to=server_cmd["to"])
+    async def server_range(interaction: discord.Interaction, from_: str, to: str) -> None:
+        window, error = resolve_range_window(from_, to, ctx.config)
         if error:
-            await _send_message(interaction, scope="server", path="range", subtitle_args=[da, a], message=error)
+            await _send_message(interaction, scope="server", path=server_cmd["range"], subtitle_args=[from_, to], message=error)
             return
         await _run_server_summary_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="range",
-            subtitle_args=[da, a],
+            path=server_cmd["range"],
+            subtitle_args=[from_, to],
             send_message=_send_message,
             send_resoconto_response=_send_resoconto_response,
         )
 
-    @server_aura_group.command(name="range", description="Show manual server aura details for a range.")
-    async def server_aura_range(interaction: discord.Interaction, da: str, a: str) -> None:
-        window, error = resolve_range_window(da, a, ctx.config)
+    @server_aura_group.command(name=server_cmd["range"], description="Show manual server aura details for a range.")
+    @app_commands.rename(from_=server_cmd["from"], to=server_cmd["to"])
+    async def server_aura_range(interaction: discord.Interaction, from_: str, to: str) -> None:
+        window, error = resolve_range_window(from_, to, ctx.config)
         if error:
-            await _send_message(interaction, scope="server", path="aura range", subtitle_args=[da, a], message=error)
+            await _send_message(interaction, scope="server", path=f"aura {server_cmd['range']}", subtitle_args=[from_, to], message=error)
             return
         await _run_server_aura_window(
             interaction,
             ctx=ctx,
             window=window,
-            path="aura range",
-            subtitle_args=[da, a],
+            path=f"aura {server_cmd['range']}",
+            subtitle_args=[from_, to],
             send_message=_send_message,
         )

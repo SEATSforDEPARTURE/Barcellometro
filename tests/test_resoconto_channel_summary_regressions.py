@@ -23,6 +23,18 @@ def test_resoconto_uses_schedule_standard_commands_only() -> None:
     assert 'name="ieri"' not in source.split("canale_aura_group")[0]
 
 
+def test_resoconto_locale_maps_expose_expected_channel_manual_names() -> None:
+    source = Path("app/plugins/commands_modular/resoconto.py").read_text()
+    assert '"today": "today"' in source
+    assert '"yesterday": "yesterday"' in source
+    assert '"last": "last"' in source
+    assert '"range": "range"' in source
+    assert '"today": "oggi"' in source
+    assert '"yesterday": "ieri"' in source
+    assert '"last": "ultimi"' in source
+    assert '"range": "intervallo"' in source
+
+
 def test_resoconto_schedule_commands_use_publish_at_every_and_enabled() -> None:
     source = Path("app/plugins/commands_modular/resoconto.py").read_text()
 
@@ -86,6 +98,7 @@ def test_update_schedule_can_clear_recurrence_and_keep_publish_at() -> None:
                 guild_id="1",
                 channel_id="2",
                 schedule_type="oggi",
+                embed_section=None,
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T23:59:59+00:00",
                 publish_at="2026-01-02T10:00:00+00:00",
@@ -98,6 +111,7 @@ def test_update_schedule_can_clear_recurrence_and_keep_publish_at() -> None:
                 guild_id="1",
                 channel_id="2",
                 publish_at=None,
+                embed_section=None,
                 repeat_every_value=None,
                 repeat_every_unit=None,
                 status="active",
@@ -108,6 +122,54 @@ def test_update_schedule_can_clear_recurrence_and_keep_publish_at() -> None:
             assert row["repeat_every_value"] is None
             assert row["repeat_every_unit"] is None
             assert row["publish_at"] == "2026-01-02T10:00:00+00:00"
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
+
+
+def test_channel_summary_schedule_persists_embed_section() -> None:
+    pytest.importorskip("aiosqlite")
+    from app.services.database import DatabaseService
+
+    async def _run() -> None:
+        db = DatabaseService(":memory:")
+        await db.connect()
+        try:
+            await db.initialize_schema()
+            schedule_id = await db.create_channel_summary_schedule(
+                guild_id="1",
+                channel_id="2",
+                schedule_type="oggi",
+                embed_section="aura",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T23:59:59+00:00",
+                publish_at="2026-01-02T10:00:00+00:00",
+                repeat_every_value=None,
+                repeat_every_unit=None,
+                created_by="99",
+            )
+            row = await db.get_channel_summary_schedule(schedule_id=schedule_id, guild_id="1", channel_id="2")
+            assert row is not None
+            assert row["embed_section"] == "aura"
+
+            listed = await db.list_channel_summary_schedules("1", "2")
+            assert listed and listed[0]["embed_section"] == "aura"
+
+            ok = await db.update_channel_summary_schedule(
+                schedule_id=schedule_id,
+                guild_id="1",
+                channel_id="2",
+                publish_at=None,
+                embed_section=None,
+                repeat_every_value=None,
+                repeat_every_unit=None,
+                status="active",
+            )
+            assert ok is True
+            updated = await db.get_channel_summary_schedule(schedule_id=schedule_id, guild_id="1", channel_id="2")
+            assert updated is not None
+            assert updated["embed_section"] is None
         finally:
             await db.close()
 
@@ -127,6 +189,7 @@ def test_schedule_channel_scope_for_status_edit_delete_clear() -> None:
                 guild_id="1",
                 channel_id="10",
                 schedule_type="oggi",
+                embed_section=None,
                 start_ts="2026-01-01T00:00:00+00:00",
                 end_ts="2026-01-01T23:59:59+00:00",
                 publish_at="2026-01-02T10:00:00+00:00",

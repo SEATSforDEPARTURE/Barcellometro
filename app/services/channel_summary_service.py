@@ -129,7 +129,13 @@ class ChannelSummaryService:
                         logger.debug("channel_summary skip schedule=%s channel=%s reason=auto_off", schedule_id, channel_id)
                         continue
                     window = self._resolve_window_from_schedule(schedule, now_local=now_local)
-                    sent = await self.generate_and_send_for_channel(str(guild.id), channel_id, manual=False, window=window)
+                    sent = await self.generate_and_send_for_channel(
+                        str(guild.id),
+                        channel_id,
+                        manual=False,
+                        window=window,
+                        embed_section=str(schedule.get("embed_section") or "").strip().lower() or None,
+                    )
                     if sent:
                         await self._database.mark_channel_summary_schedule_sent(schedule_id)
                         logger.info("channel_summary sent ok guild=%s channel=%s schedule_id=%s", guild.id, channel_id, schedule_id)
@@ -390,7 +396,15 @@ class ChannelSummaryService:
             "usable_messages": usable_content_messages,
         }
 
-    async def generate_and_send_for_channel(self, guild_id: str, channel_id: str, *, manual: bool = False, window: TimeWindowResult | None = None) -> bool:
+    async def generate_and_send_for_channel(
+        self,
+        guild_id: str,
+        channel_id: str,
+        *,
+        manual: bool = False,
+        window: TimeWindowResult | None = None,
+        embed_section: str | None = None,
+    ) -> bool:
         channel = self._bot.get_channel(int(channel_id))
         if not isinstance(channel, discord.abc.Messageable):
             logger.warning("channel_summary channel not accessible guild=%s channel=%s", guild_id, channel_id)
@@ -398,12 +412,45 @@ class ChannelSummaryService:
 
         if window is None:
             window = resolve_oggi_window()
+        normalized_embed_section = str(embed_section or "").strip().lower() or None
+        if normalized_embed_section not in {None, "panoramica", "riassunto", "aura"}:
+            logger.warning("channel_summary invalid embed_section=%s guild=%s channel=%s", embed_section, guild_id, channel_id)
+            normalized_embed_section = None
         now_local = datetime.now(ROME_TZ)
         start_local = window.start_dt.astimezone(ROME_TZ)
         end_local = window.end_dt.astimezone(ROME_TZ)
         start_dt = start_local.astimezone(timezone.utc)
         end_dt = end_local.astimezone(timezone.utc)
         logger.debug("channel_summary period guild=%s channel=%s start_utc=%s end_utc=%s", guild_id, channel_id, start_dt.isoformat(), end_dt.isoformat())
+        if normalized_embed_section == "aura":
+            aura_embed = await self.build_channel_summary_aura_embed(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                start_local=start_local,
+                end_local=end_local,
+            )
+            if aura_embed is None:
+                logger.info("channel_summary aura_only_skipped_no_data guild=%s channel=%s", guild_id, channel_id)
+                return False
+            attach_footer_meta(aura_embed, service_name="channel_summary", used_local_processing=True)
+            await finalize_embeds_author([aura_embed], None, default_service_name="channel_summary")
+            try:
+                await channel.send(embeds=[aura_embed])
+            except discord.HTTPException:
+                logger.exception("channel_summary aura_only_send_failed guild=%s channel=%s", guild_id, channel_id)
+                return False
+            if manual:
+                today = datetime.now(ROME_TZ).date().isoformat()
+                await self._database.mark_daily_report_sent(
+                    guild_id,
+                    channel_id,
+                    today,
+                    local_time_str=datetime.now(ROME_TZ).strftime("%H:%M"),
+                    sent_kind="manual",
+                )
+            logger.info("channel_summary sent_aura_only guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
+            return True
+
         rows = await self._database.fetch_messages_in_range(channel_id=channel_id, start_ts=start_dt.isoformat(), end_ts=end_dt.isoformat(), limit=1200)
         who_candidates, who_fallback_lines = await self._build_who_interacted_candidates(rows=rows, guild_id=guild_id)
         messages = [
@@ -736,10 +783,15 @@ class ChannelSummaryService:
                 logger.warning("channel_summary aura_embed_over_budget chars=%s guild=%s channel=%s", aura_chars_final, guild_id, channel_id)
                 embeds = embeds[:2]
         await finalize_embeds_author(embeds, None, default_service_name="channel_summary")
+        selected_embeds = embeds
+        if normalized_embed_section == "panoramica":
+            selected_embeds = embeds[:1]
+        elif normalized_embed_section == "riassunto":
+            selected_embeds = embeds[1:2]
         try:
-            if len(embeds) >= 3:
-                first_batch = embeds[:2]
-                second_batch = [embeds[2]]
+            if len(selected_embeds) >= 3:
+                first_batch = selected_embeds[:2]
+                second_batch = [selected_embeds[2]]
                 logger.debug(
                     "channel_summary send_batch1 embeds=%s total_chars=%s guild=%s channel=%s",
                     len(first_batch),
@@ -759,12 +811,12 @@ class ChannelSummaryService:
             else:
                 logger.debug(
                     "channel_summary send_batch1 embeds=%s total_chars=%s guild=%s channel=%s",
-                    len(embeds),
-                    estimate_embeds_total_size(embeds),
+                    len(selected_embeds),
+                    estimate_embeds_total_size(selected_embeds),
                     guild_id,
                     channel_id,
                 )
-                await channel.send(embeds=embeds)
+                await channel.send(embeds=selected_embeds)
         except discord.HTTPException:
             logger.exception("channel_summary send failed guild=%s channel=%s", guild_id, channel_id)
             return False
@@ -777,7 +829,13 @@ class ChannelSummaryService:
                 local_time_str=datetime.now(ROME_TZ).strftime("%H:%M"),
                 sent_kind="manual",
             )
-        logger.info("channel_summary sent guild=%s channel=%s manual=%s", guild_id, channel_id, manual)
+        logger.info(
+            "channel_summary sent guild=%s channel=%s manual=%s embed_section=%s",
+            guild_id,
+            channel_id,
+            manual,
+            normalized_embed_section or "full",
+        )
         return True
 
 
