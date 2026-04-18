@@ -215,7 +215,7 @@ def test_embed_section_aura_single_uses_standalone_description_without_paginatio
         service = _service_for_embed_selection_description(channel)
 
         async def _fake_aura_embed(*, standalone_description: bool = False, **_kwargs):
-            description = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati 73 PUNTI AURA ai partecipanti coinvolti, mentre 0 PUNTI AURA sono stati revocati nel canale selezionato." if standalone_description else "*Oggi. Giovedì, 16 Aprile 2026 Nel periodo di riferimento sono stati assegnati ...*"
+            description = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati 73 PUNTI AURA ai partecipanti coinvolti, mentre 0 PUNTI AURA sono stati revocati nel canale selezionato." if standalone_description else "*Nel periodo di riferimento sono stati assegnati ...*"
             return discord.Embed(title="AURA", description=description)
 
         service.build_channel_summary_aura_embed = AsyncMock(side_effect=_fake_aura_embed)
@@ -268,7 +268,7 @@ def test_embed_section_panoramica_aura_uses_multipage_aura_description() -> None
         service = _service_for_embed_selection_description(channel)
 
         async def _fake_aura_embed(*, standalone_description: bool = False, **_kwargs):
-            prefix = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati..." if standalone_description else "*Oggi. Giovedì, 16 Aprile 2026 Nel periodo di riferimento sono stati assegnati ...*"
+            prefix = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati..." if standalone_description else "*Nel periodo di riferimento sono stati assegnati ...*"
             return discord.Embed(title="AURA", description=prefix)
 
         service.build_channel_summary_aura_embed = AsyncMock(side_effect=_fake_aura_embed)
@@ -283,10 +283,12 @@ def test_embed_section_panoramica_aura_uses_multipage_aura_description() -> None
         assert sent is True
         payload = channel.send.await_args.kwargs["embeds"]
         assert len(payload) == 2
+        assert service.build_channel_summary_aura_embed.await_args.kwargs["standalone_description"] is False
         assert payload[0].author.name.endswith("(Pag. 1/2)")
         assert payload[1].author.name.endswith("(Pag. 2/2)")
         assert "Nel periodo di riferimento" in (payload[1].description or "")
-        assert not (payload[1].description or "").startswith("**Oggi.")
+        assert "**Oggi." not in (payload[1].description or "")
+        assert "Oggi. " not in (payload[1].description or "")
 
     asyncio.run(_run())
 
@@ -297,7 +299,7 @@ def test_embed_section_riassunto_aura_uses_multipage_descriptions_for_both() -> 
         service = _service_for_embed_selection_description(channel)
 
         async def _fake_aura_embed(*, standalone_description: bool = False, **_kwargs):
-            description = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati..." if standalone_description else "*Oggi. Giovedì, 16 Aprile 2026 Nel periodo di riferimento sono stati assegnati ...*"
+            description = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati..." if standalone_description else "*Nel periodo di riferimento sono stati assegnati ...*"
             return discord.Embed(title="AURA", description=description)
 
         service.build_channel_summary_aura_embed = AsyncMock(side_effect=_fake_aura_embed)
@@ -312,10 +314,12 @@ def test_embed_section_riassunto_aura_uses_multipage_descriptions_for_both() -> 
         assert sent is True
         payload = channel.send.await_args.kwargs["embeds"]
         assert len(payload) == 2
+        assert service.build_channel_summary_aura_embed.await_args.kwargs["standalone_description"] is False
         assert "Andiamo a leggere cosa è successo" in (payload[0].description or "")
         assert not (payload[0].description or "").startswith("**Oggi.")
         assert "Nel periodo di riferimento" in (payload[1].description or "")
-        assert not (payload[1].description or "").startswith("**Oggi.")
+        assert "**Oggi." not in (payload[1].description or "")
+        assert "Oggi. " not in (payload[1].description or "")
 
     asyncio.run(_run())
 
@@ -326,7 +330,7 @@ def test_embed_section_full_summary_keeps_existing_multipage_behavior() -> None:
         service = _service_for_embed_selection_description(channel)
 
         async def _fake_aura_embed(*, standalone_description: bool = False, **_kwargs):
-            description = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati..." if standalone_description else "*Oggi. Giovedì, 16 Aprile 2026 Nel periodo di riferimento sono stati assegnati ...*"
+            description = "**Oggi. Giovedì, 16 Aprile 2026** sono stati assegnati..." if standalone_description else "*Nel periodo di riferimento sono stati assegnati ...*"
             return discord.Embed(title="AURA", description=description)
 
         service.build_channel_summary_aura_embed = AsyncMock(side_effect=_fake_aura_embed)
@@ -343,10 +347,13 @@ def test_embed_section_full_summary_keeps_existing_multipage_behavior() -> None:
         second_batch = channel.send.await_args_list[1].kwargs["embeds"]
         assert len(first_batch) == 2
         assert len(second_batch) == 1
+        assert service.build_channel_summary_aura_embed.await_args.kwargs["standalone_description"] is False
         assert first_batch[0].author.name.endswith("(Pag. 1/3)")
         assert first_batch[1].author.name.endswith("(Pag. 2/3)")
         assert second_batch[0].author.name.endswith("(Pag. 3/3)")
         assert "Andiamo a leggere cosa è successo" in (first_batch[1].description or "")
         assert "Nel periodo di riferimento" in (second_batch[0].description or "")
+        assert "**Oggi." not in (second_batch[0].description or "")
+        assert "Oggi. " not in (second_batch[0].description or "")
 
     asyncio.run(_run())

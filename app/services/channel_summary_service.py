@@ -1137,9 +1137,6 @@ class ChannelSummaryService:
                 assigned=total_positive,
                 revoked=total_negative,
             )
-        elif window_header:
-            period_prefix = build_channel_summary_period_prefix(window_header)
-            aura_embed.description = f"*{period_prefix} {str(aura_embed.description or '').strip('* ')}*"
         logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)
         return aura_embed
 
