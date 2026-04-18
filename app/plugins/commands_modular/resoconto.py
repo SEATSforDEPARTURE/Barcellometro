@@ -816,12 +816,14 @@ def register_resoconto(
         if row is None:
             await _send_message(interaction, scope="canale", path="schedule_show", message="❌ Schedule not found in this channel.")
             return
+        schedule_row = dict(row)
+        schedule_line = _format_schedule_line(schedule_row, key="type")
         await _send_resoconto_response(
             interaction,
             scope="canale",
             path="schedule_show",
-            lines=[("schedule_id", schedule_id)],
-            sections=[CommandEmbedSection(title="Details", lines=[_format_schedule_line(dict(row), key="type")])],
+            lines=[("schedule", schedule_line)],
+            sections=[CommandEmbedSection(title="Details", lines=[schedule_line])],
         )
 
     @resocontocanale_group.command(name="schedule_list", description="List channel summary schedules for the current channel.")
@@ -833,11 +835,16 @@ def register_resoconto(
             return
         rows = await ctx.database.list_channel_summary_schedules(str(interaction.guild_id), str(interaction.channel_id))
         normalized_rows = [dict(row) for row in rows]
+        primary_lines: list[tuple[str, object]]
+        if normalized_rows:
+            primary_lines = [("schedule", _format_schedule_line(row, key="type")) for row in normalized_rows]
+        else:
+            primary_lines = [("schedules", 0)]
         await _send_resoconto_response(
             interaction,
             scope="canale",
             path="schedule_list",
-            lines=[("channel", f"<#{interaction.channel_id}>"), ("schedules", len(normalized_rows))],
+            lines=primary_lines,
             sections=_schedule_section(normalized_rows, key="type", empty_message="No channel summary schedules found."),
             kind="warning" if not normalized_rows else "info",
         )
