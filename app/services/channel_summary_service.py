@@ -467,6 +467,7 @@ class ChannelSummaryService:
                 channel_id,
             )
         selected_sections = tuple(requested_sections or CHANNEL_SUMMARY_SECTION_ORDER)
+        is_single_embed = len(selected_sections) == 1
         needs_panoramica = "panoramica" in selected_sections
         needs_riassunto = requires_channel_summary_ai(selected_sections)
         needs_aura = "aura" in selected_sections
@@ -484,7 +485,7 @@ class ChannelSummaryService:
             requested_unit=window.requested_unit,
         )
         logger.debug("channel_summary period guild=%s channel=%s start_utc=%s end_utc=%s", guild_id, channel_id, start_dt.isoformat(), end_dt.isoformat())
-        if selected_sections == ("aura",):
+        if is_single_embed and selected_sections == ("aura",):
             aura_embed = await self.build_channel_summary_aura_embed(
                 guild_id=guild_id,
                 channel_id=channel_id,
@@ -808,6 +809,7 @@ class ChannelSummaryService:
                     start_local=start_local,
                     end_local=end_local,
                     window_header=window_header,
+                    standalone_description=is_single_embed,
                 )
 
             embeds = build_channel_summary_embeds(
@@ -861,7 +863,7 @@ class ChannelSummaryService:
             if needs_aura and len(embeds) >= 3:
                 embed_by_section["aura"] = embeds[2]
             selected_embeds = [embed_by_section[section] for section in selected_sections if section in embed_by_section]
-            if selected_sections == ("riassunto",) and selected_embeds:
+            if is_single_embed and selected_sections == ("riassunto",) and selected_embeds:
                 selected_embeds[0].description = self._build_standalone_riassunto_description(window_header=window_header)
         else:
             if needs_panoramica:
@@ -880,7 +882,7 @@ class ChannelSummaryService:
                     start_local=start_local,
                     end_local=end_local,
                     window_header=window_header,
-                    standalone_description=(len(selected_sections) == 1),
+                    standalone_description=is_single_embed,
                 )
                 if aura_embed is not None:
                     selected_embeds.append(aura_embed)
