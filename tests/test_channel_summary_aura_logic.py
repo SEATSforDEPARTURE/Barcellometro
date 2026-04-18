@@ -3,6 +3,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from app.services import channel_summary_service as channel_summary_module
 from app.services.channel_summary_service import ChannelSummaryService
 
 
@@ -141,5 +142,51 @@ def test_channel_summary_aura_karma_falls_back_when_no_eligible_participants() -
         assert embed is not None
         karma_field = next(field for field in embed.fields if "KARMA" in field.name.upper())
         assert "Dati ancora troppo scarsi" in karma_field.value
+
+    asyncio.run(_run())
+
+
+def test_generate_and_send_for_channel_aura_only_skips_summary_pipeline() -> None:
+    async def _run() -> None:
+        class _FakeChannel(channel_summary_module.discord.abc.Messageable):
+            async def _get_channel(self):
+                return self
+
+            async def send(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                return None
+
+        channel = _FakeChannel()
+        channel.send = AsyncMock()
+        bot = SimpleNamespace(get_channel=lambda _cid: channel)
+        database = SimpleNamespace(mark_daily_report_sent=AsyncMock())
+        summary_service = SimpleNamespace(build_summary=AsyncMock(), get_config=AsyncMock(return_value={}))
+        service = ChannelSummaryService(
+            database=database,
+            bot=bot,
+            summary_service=summary_service,
+            barcello_service=SimpleNamespace(),
+        )
+        service.build_channel_summary_aura_embed = AsyncMock(return_value=SimpleNamespace())
+        old_attach_footer_meta = channel_summary_module.attach_footer_meta
+        old_finalize = channel_summary_module.finalize_embeds_author
+        channel_summary_module.attach_footer_meta = lambda *_args, **_kwargs: None
+        channel_summary_module.finalize_embeds_author = AsyncMock()
+
+        try:
+            sent = await service.generate_and_send_for_channel(
+                guild_id="1",
+                channel_id="2",
+                embed_section="aura",
+                manual=False,
+            )
+        finally:
+            channel_summary_module.attach_footer_meta = old_attach_footer_meta
+            channel_summary_module.finalize_embeds_author = old_finalize
+
+        assert sent is True
+        summary_service.build_summary.assert_not_called()
+        channel.send.assert_awaited_once()
+        payload = channel.send.await_args.kwargs["embeds"]
+        assert len(payload) == 1
 
     asyncio.run(_run())

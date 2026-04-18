@@ -354,6 +354,7 @@ class DatabaseService:
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
                 type TEXT NOT NULL,
+                embed_section TEXT NULL,
                 start_ts TEXT NULL,
                 end_ts TEXT NULL,
                 publish_at TEXT NOT NULL,
@@ -1407,6 +1408,7 @@ class DatabaseService:
             "next_run_at": "TEXT NULL",
             "created_at": "TEXT NULL",
             "updated_at": "TEXT NULL",
+            "embed_section": "TEXT NULL",
         }
         for name, col_def in missing.items():
             if name not in existing:
@@ -4172,6 +4174,7 @@ class DatabaseService:
         guild_id: str,
         channel_id: str,
         schedule_type: str,
+        embed_section: str | None,
         start_ts: str | None,
         end_ts: str | None,
         publish_at: str,
@@ -4184,15 +4187,16 @@ class DatabaseService:
         cur = await self._conn.execute(
             """
             INSERT INTO channel_summary_schedule (
-                guild_id, channel_id, type, start_ts, end_ts, publish_at,
+                guild_id, channel_id, type, embed_section, start_ts, end_ts, publish_at,
                 repeat_every_value, repeat_every_unit, created_by, status,
                 last_run_at, next_run_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, ?)
             """,
             (
                 guild_id,
                 channel_id,
                 schedule_type,
+                embed_section,
                 start_ts,
                 end_ts,
                 publish_at,
@@ -4257,7 +4261,7 @@ class DatabaseService:
     async def list_channel_summary_schedules(self, guild_id: str, channel_id: str) -> list[aiosqlite.Row]:
         return await self.fetchall(
             """
-            SELECT id, type, start_ts, end_ts, publish_at, repeat_every_value, repeat_every_unit, status, last_run_at, next_run_at
+            SELECT id, type, embed_section, start_ts, end_ts, publish_at, repeat_every_value, repeat_every_unit, status, last_run_at, next_run_at
             FROM channel_summary_schedule
             WHERE guild_id = ? AND channel_id = ?
             ORDER BY COALESCE(next_run_at, publish_at) ASC
@@ -4268,7 +4272,7 @@ class DatabaseService:
     async def get_channel_summary_schedule(self, *, schedule_id: int, guild_id: str, channel_id: str) -> Optional[aiosqlite.Row]:
         return await self.fetchone(
             """
-            SELECT id, guild_id, channel_id, type, start_ts, end_ts, publish_at,
+            SELECT id, guild_id, channel_id, type, embed_section, start_ts, end_ts, publish_at,
                    repeat_every_value, repeat_every_unit, status, last_run_at, next_run_at
             FROM channel_summary_schedule
             WHERE id = ? AND guild_id = ? AND channel_id = ?
@@ -4283,6 +4287,7 @@ class DatabaseService:
         guild_id: str,
         channel_id: str,
         publish_at: str | None,
+        embed_section: str | None,
         repeat_every_value: int | None,
         repeat_every_unit: str | None,
         status: str | None,
@@ -4302,6 +4307,7 @@ class DatabaseService:
             UPDATE channel_summary_schedule
             SET publish_at = COALESCE(?, publish_at),
                 next_run_at = COALESCE(?, next_run_at, publish_at),
+                embed_section = ?,
                 repeat_every_value = ?,
                 repeat_every_unit = ?,
                 status = ?,
@@ -4311,6 +4317,7 @@ class DatabaseService:
             (
                 publish_at,
                 publish_at,
+                embed_section,
                 repeat_every_value,
                 repeat_every_unit,
                 safe_status,
