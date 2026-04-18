@@ -437,6 +437,7 @@ class ChannelSummaryService:
                 start_local=start_local,
                 end_local=end_local,
                 window_header=window_header,
+                standalone_description=True,
             )
             if aura_embed is None:
                 logger.info("channel_summary aura_only_skipped_no_data guild=%s channel=%s", guild_id, channel_id)
@@ -799,8 +800,7 @@ class ChannelSummaryService:
         elif normalized_embed_section == "riassunto":
             selected_embeds = embeds[1:2]
             if selected_embeds:
-                period_prefix = build_channel_summary_period_prefix(window_header)
-                selected_embeds[0].description = f"*{period_prefix} Andiamo a leggere cosa è successo...*"
+                selected_embeds[0].description = self._build_standalone_riassunto_description(window_header=window_header)
         if normalized_embed_section in {"panoramica", "riassunto"}:
             await finalize_embeds_author(selected_embeds, None, default_service_name="channel_summary")
         else:
@@ -883,6 +883,17 @@ class ChannelSummaryService:
             return "⬇️", "in calo rispetto al periodo precedente"
         return "↔️", "stabile rispetto al periodo precedente"
 
+    def _build_standalone_riassunto_description(self, *, window_header: str) -> str:
+        period_text = build_channel_summary_period_prefix(window_header, trailing_period=False)
+        return f"**{period_text}** è successo..."
+
+    def _build_standalone_aura_description(self, *, window_header: str, assigned: int, revoked: int) -> str:
+        period_text = build_channel_summary_period_prefix(window_header, trailing_period=False)
+        return (
+            f"**{period_text}** sono stati assegnati {int(assigned)} PUNTI AURA ai partecipanti coinvolti, "
+            f"mentre {abs(int(revoked))} PUNTI AURA sono stati revocati nel canale selezionato."
+        )
+
     async def generate_channel_aura_embed(
         self,
         *,
@@ -912,6 +923,7 @@ class ChannelSummaryService:
             start_local=start_local,
             end_local=end_local,
             window_header=window_header,
+            standalone_description=True,
         )
 
     async def build_channel_summary_aura_embed(
@@ -922,6 +934,7 @@ class ChannelSummaryService:
         start_local: datetime,
         end_local: datetime,
         window_header: str | None = None,
+        standalone_description: bool = False,
     ) -> discord.Embed | None:
         start_ts = start_local.astimezone(timezone.utc).isoformat()
         end_ts = end_local.astimezone(timezone.utc).isoformat()
@@ -1031,7 +1044,13 @@ class ChannelSummaryService:
                 previous_average_karma_participants=int(previous_avg_karma.get("participants_count") or 0),
             )
         )
-        if window_header:
+        if window_header and standalone_description:
+            aura_embed.description = self._build_standalone_aura_description(
+                window_header=window_header,
+                assigned=total_positive,
+                revoked=total_negative,
+            )
+        elif window_header:
             period_prefix = build_channel_summary_period_prefix(window_header)
             aura_embed.description = f"*{period_prefix} {str(aura_embed.description or '').strip('* ')}*"
         logger.debug("channel_summary aura_embed_chars=%s guild=%s channel=%s", _estimate_embed_size(aura_embed), guild_id, channel_id)

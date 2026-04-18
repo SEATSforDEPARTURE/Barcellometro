@@ -121,8 +121,27 @@ def test_generate_channel_aura_embed_uses_channel_summary_author_without_paginat
         assert embed.author.name == "servizio CHANNEL SUMMARY"
         assert "Pag." not in (embed.author.name or "")
         assert "DM SERVER SUMMARY" not in (embed.author.name or "")
-        assert embed.description is not None and embed.description.startswith("*Oggi. ")
+        assert embed.description is not None and embed.description.startswith("**Oggi. ")
+        assert "sono stati assegnati 120 PUNTI AURA" in (embed.description or "")
+        assert "Nel periodo di riferimento" not in (embed.description or "")
         assert "PUNTI AURA" in (embed.description or "")
+
+    asyncio.run(_run())
+
+
+def test_full_report_channel_aura_embed_keeps_multipage_description_style() -> None:
+    async def _run() -> None:
+        service = _service()
+        embed = await service.build_channel_summary_aura_embed(
+            guild_id="1",
+            channel_id="2",
+            start_local=datetime(2026, 4, 16, 0, 0),
+            end_local=datetime(2026, 4, 16, 23, 59),
+            window_header="**🗓️ Oggi. Giovedì, 16 Aprile 2026**",
+        )
+        assert embed is not None
+        assert (embed.description or "").startswith("*Oggi. ")
+        assert "Nel periodo di riferimento" in (embed.description or "")
 
     asyncio.run(_run())
 
